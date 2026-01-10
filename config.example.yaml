@@ -1,0 +1,77 @@
+# Claudible Configuration Example
+# Copy this file to ~/.config/claudible/config.yaml and customize
+
+notifications:
+  # Default provider to use when multiple are enabled
+  default_provider: imessage
+
+  providers:
+    # iMessage via AppleScript (macOS only)
+    imessage:
+      enabled: true
+      target: "+1XXXXXXXXXX"  # Your phone number or Apple ID email
+
+    # SMS notification providers (cross-platform)
+    sms:
+      enabled: false
+      provider: twilio        # Options: twilio, vonage, plivo
+      from: "+1XXXXXXXXXX"    # Your provider phone number
+      to: "+1YYYYYYYYYY"      # Destination phone number
+
+      # Twilio credentials (when provider: twilio)
+      account_sid: ""         # Twilio Account SID
+      auth_token: ""          # Twilio Auth Token
+
+      # Vonage/Nexmo credentials (when provider: vonage)
+      api_key: ""             # Vonage API Key
+      api_secret: ""          # Vonage API Secret
+
+      # Plivo credentials (when provider: plivo)
+      auth_id: ""             # Plivo Auth ID
+      # auth_token is shared with Twilio field above
+
+    # HTTP webhooks (Pushcut, IFTTT, custom endpoints)
+    http:
+      enabled: false
+      endpoint: "https://api.pushcut.io/YOUR_KEY/notifications/Claude"
+      headers:
+        Content-Type: application/json
+
+    # Desktop notifications (osascript on macOS, notify-send on Linux)
+    desktop:
+      enabled: false
+
+    # Pushover push notifications (https://pushover.net)
+    pushover:
+      enabled: false
+      app_token: ""           # Your Pushover application API token
+      user_key: ""            # Your Pushover user key
+      priority: 0             # -2 (lowest) to 2 (emergency), 0 is normal
+
+    # Pushbullet push notifications (https://pushbullet.com)
+    pushbullet:
+      enabled: false
+      api_key: ""             # Your Pushbullet access token
+      device_iden: ""         # Optional: target a specific device
+
+behavior:
+  # Which states trigger notifications
+  # Options: complete, waiting, stopped, idle
+  notify_on:
+    - complete
+    - waiting
+
+  # Maximum message length (characters)
+  max_message_length: 900
+
+  # Include the repository path in notifications
+  include_repo_path: true
+
+# LLM Evaluator for smart state classification (optional)
+# Uses AI to analyze conversation context for more accurate state detection
+evaluator:
+  enabled: false
+  provider: anthropic        # Options: anthropic, openai
+  api_key: ""                # Your API key for the LLM provider
+  model: "claude-3-haiku-20240307"  # Anthropic: claude-3-haiku-*, OpenAI: gpt-4o-mini
+  max_tokens: 256            # Max tokens for LLM response

@@ -1,0 +1,46 @@
+# Binaries
+build/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of go coverage
+*.out
+coverage.html
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE and editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local configuration (user secrets)
+config.yaml
+config.yml
+
+# Serena MCP cache
+.serena/cache/
+
+# Claude local settings
+.claude/
+
+# Logs
+*.log
+
+# Environment files
+.env
+.env.local
