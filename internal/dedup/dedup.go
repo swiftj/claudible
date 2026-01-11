@@ -107,8 +107,9 @@ func (d *Deduplicator) ShouldSend(msg notification.NotificationMessage) bool {
 		return true
 	}
 
-	// Generate content hash for similarity detection
-	hash := d.hashContent(msg)
+	// Generate request hash - this identifies the "work" being done
+	// The Request (user prompt) is the most stable identifier across duplicate events
+	requestHash := d.hashRequest(msg)
 
 	now := time.Now()
 	entry, exists := d.recent[key]
@@ -116,44 +117,47 @@ func (d *Deduplicator) ShouldSend(msg notification.NotificationMessage) bool {
 	if exists && now.Sub(entry.timestamp) <= d.window {
 		// We have a recent notification for this session
 
-		// Check if content is similar (same hash = same content)
-		if entry.hash == hash {
-			// Exact duplicate - suppress
-			return false
-		}
+		// Primary check: same request = same work, likely duplicate
+		if entry.hash == requestHash {
+			// Same work detected within the time window
 
-		// Check if content is similar but states differ
-		// This handles the case where COMPLETE and WAITING arrive for the same work
-		if d.isSimilarContent(entry.summary, msg.Summary) {
-			// Similar content with different state
-			// Prefer COMPLETE over WAITING (COMPLETE is more informative)
-			if entry.state == state.StateComplete && msg.State == state.StateWaiting {
-				// Already sent COMPLETE, suppress WAITING
+			// If we already sent a COMPLETE, always suppress subsequent messages
+			if entry.state == state.StateComplete {
 				return false
 			}
-			if entry.state == state.StateWaiting && msg.State == state.StateComplete {
-				// Sent WAITING but now have COMPLETE - allow COMPLETE through
-				// Update the entry to COMPLETE
-				entry.state = msg.State
-				entry.hash = hash
-				entry.summary = msg.Summary
-				entry.timestamp = now
-				return true
-			}
-			// Same or other state combinations with similar content - suppress
+
+			// If we sent WAITING and now have COMPLETE, suppress the duplicate
+			// The first notification (WAITING or COMPLETE) wins
+			// This prevents the "double notification" problem entirely
 			return false
 		}
+
+		// Different request hash = different work, allow through
 	}
 
-	// New notification or different content - record and allow
+	// New notification or different work - record and allow
 	d.recent[key] = &recentEntry{
-		hash:      hash,
+		hash:      requestHash,
 		state:     msg.State,
 		timestamp: now,
 		summary:   msg.Summary,
 	}
 
 	return true
+}
+
+// hashRequest creates a hash of the user request for work identification.
+// The Request (user prompt) is stable across duplicate events, unlike the Summary
+// which may vary depending on LLM responses or state classification.
+func (d *Deduplicator) hashRequest(msg notification.NotificationMessage) string {
+	// Use the request as the primary identifier for "same work"
+	// Fall back to summary if request is empty
+	content := msg.Request
+	if content == "" {
+		content = msg.Summary
+	}
+	hash := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(hash[:8]) // First 8 bytes is enough
 }
 
 // hashContent creates a hash of the notification content for exact duplicate detection.
@@ -238,7 +242,7 @@ func (d *Deduplicator) RecordSent(msg notification.NotificationMessage) {
 	}
 
 	d.recent[key] = &recentEntry{
-		hash:      d.hashContent(msg),
+		hash:      d.hashRequest(msg),
 		state:     msg.State,
 		timestamp: time.Now(),
 		summary:   msg.Summary,

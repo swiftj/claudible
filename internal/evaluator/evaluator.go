@@ -16,7 +16,7 @@ import (
 
 const (
 	// DefaultMaxTokens is the default maximum tokens for LLM responses.
-	DefaultMaxTokens = 256
+	DefaultMaxTokens = 1000
 
 	// DefaultTimeout is the default HTTP request timeout.
 	DefaultTimeout = 30 * time.Second
@@ -38,14 +38,22 @@ const (
 )
 
 // evaluationPromptTemplate is the prompt used to analyze Claude Code interactions.
+// The %s placeholders are: provider_names, user_request, assistant_response
 const evaluationPromptTemplate = `Analyze this Claude Code interaction and determine if the task is complete.
 
 User Request: %s
 
 Assistant Response: %s
 
+IMPORTANT FORMATTING RULES:
+- These summaries will be sent to: %s
+- Use PLAIN TEXT only - NO Markdown formatting (no ##, **, ---, |tables|, etc.)
+- Keep it concise: 1-2 sentences maximum
+- Emojis are OK and encouraged for status indicators (✅ ❌ ⏳ etc.)
+- No bullet points, numbered lists, or special formatting
+
 Respond with JSON only:
-{"state": "complete|waiting|needs_review", "summary": "one line summary", "confidence": 0.0-1.0}
+{"state": "complete|waiting|needs_review", "summary": "plain text summary with optional emojis", "confidence": 0.0-1.0}
 
 - complete: The assistant finished the requested work
 - waiting: The assistant is asking a question or needs user input
@@ -126,13 +134,20 @@ func (e *Evaluator) Enabled() bool {
 }
 
 // Evaluate analyzes the user request and assistant response to determine completion state.
+// The providers parameter indicates which notification providers are enabled (for formatting hints).
 // Returns nil if evaluation fails (caller should fall back to heuristics).
-func (e *Evaluator) Evaluate(ctx context.Context, userRequest, assistantResponse string) (*EvaluationResult, error) {
+func (e *Evaluator) Evaluate(ctx context.Context, userRequest, assistantResponse string, providers ...string) (*EvaluationResult, error) {
 	if !e.Enabled() {
 		return nil, nil
 	}
 
-	prompt := fmt.Sprintf(evaluationPromptTemplate, userRequest, assistantResponse)
+	// Default provider hint if none specified
+	providerHint := "mobile notifications (iMessage, SMS)"
+	if len(providers) > 0 {
+		providerHint = strings.Join(providers, ", ")
+	}
+
+	prompt := fmt.Sprintf(evaluationPromptTemplate, userRequest, assistantResponse, providerHint)
 
 	var response string
 	var err error

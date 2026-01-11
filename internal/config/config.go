@@ -164,7 +164,7 @@ func Default() *Config {
 			Provider:  "",
 			APIKey:    "",
 			Model:     "",
-			MaxTokens: 1024,
+			MaxTokens: 1000,
 		},
 	}
 }

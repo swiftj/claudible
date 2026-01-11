@@ -149,7 +149,9 @@ func (r *Router) classifyState(ctx context.Context, input *hook.HookInput, t *tr
 		assistantResponse := t.LastAssistantResponse()
 
 		if userRequest != "" && assistantResponse != "" {
-			result, err := r.evaluator.Evaluate(ctx, userRequest, assistantResponse)
+			// Get enabled provider names for formatting hints
+			enabledProviders := r.config.GetEnabledProviders()
+			result, err := r.evaluator.Evaluate(ctx, userRequest, assistantResponse, enabledProviders...)
 			if err != nil {
 				log.Printf("router: evaluator failed, falling back to heuristics: %v", err)
 			} else if result != nil {
