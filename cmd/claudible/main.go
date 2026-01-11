@@ -16,6 +16,7 @@ import (
 	"github.com/johnswift/claudible/internal/config"
 	"github.com/johnswift/claudible/internal/hook"
 	"github.com/johnswift/claudible/internal/router"
+	"github.com/johnswift/claudible/internal/setup"
 	"github.com/johnswift/claudible/internal/state"
 	"github.com/johnswift/claudible/internal/transcript"
 )
@@ -37,6 +38,18 @@ type flags struct {
 }
 
 func main() {
+	// Check for subcommands first
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "setup":
+			runSetup()
+			return
+		case "help", "-h", "--help":
+			printUsage()
+			os.Exit(0)
+		}
+	}
+
 	// Parse command-line flags
 	f := parseFlags()
 
@@ -188,4 +201,66 @@ func configSource(configPath string) string {
 		return "default"
 	}
 	return defaultPath
+}
+
+// runSetup handles the 'setup' subcommand.
+func runSetup() {
+	// Parse setup-specific flags
+	setupFlags := flag.NewFlagSet("setup", flag.ExitOnError)
+	phone := setupFlags.String("phone", "", "phone number for iMessage (non-interactive mode)")
+	verbose := setupFlags.Bool("verbose", false, "enable verbose output")
+
+	// Skip "setup" in args
+	if err := setupFlags.Parse(os.Args[2:]); err != nil {
+		fmt.Fprintf(os.Stderr, "claudible setup: %v\n", err)
+		os.Exit(1)
+	}
+
+	wizard := setup.NewWizard(*verbose)
+
+	var err error
+	if *phone != "" {
+		// Non-interactive mode
+		err = wizard.RunNonInteractive(*phone)
+	} else {
+		// Interactive mode
+		err = wizard.Run()
+	}
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Setup failed: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// printUsage prints the usage message.
+func printUsage() {
+	fmt.Printf(`Claudible - Claude Code Notification System v%s
+
+Usage:
+  claudible [flags]           Process hook input from stdin (normal mode)
+  claudible setup [flags]     Interactive setup wizard
+
+Flags:
+  --config PATH    Custom config file path
+  --dry-run        Parse and classify but don't send notifications
+  --verbose        Enable verbose logging
+  --version        Print version and exit
+
+Setup Flags:
+  --phone NUMBER   Phone number for iMessage (skip interactive prompt)
+  --verbose        Enable verbose output
+
+Examples:
+  # Interactive setup (recommended for first-time users)
+  claudible setup
+
+  # Non-interactive setup with phone number
+  claudible setup --phone "+15551234567"
+
+  # Test hook processing without sending notifications
+  echo '{"session_id":"test"}' | claudible --dry-run --verbose
+
+For more information, visit: https://github.com/johnswift/claudible
+`, Version)
 }

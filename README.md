@@ -58,6 +58,37 @@ Claude Code → Hook Event → Claudible → Your Phone/Desktop
 
 ## Quick Start
 
+### One-Command Setup (macOS with iMessage)
+
+The fastest way to get started on macOS:
+
+```bash
+# 1. Install claudible globally
+go install github.com/johnswift/claudible/cmd/claudible@latest
+
+# 2. Run the setup wizard
+claudible setup
+```
+
+That's it! The setup wizard will:
+- Ask for your phone number (or Apple ID email)
+- Create the configuration file at `~/.config/claudible/config.yaml`
+- Add the SessionEnd hook to Claude Code's `~/.claude/settings.json`
+
+You'll start receiving iMessage notifications immediately when Claude Code completes tasks or needs your input.
+
+**Non-interactive setup** (for scripts or automation):
+
+```bash
+claudible setup --phone "+15551234567"
+```
+
+---
+
+### Manual Setup
+
+For more control or non-macOS platforms:
+
 ```bash
 # 1. Install
 make install
@@ -75,7 +106,7 @@ behavior:
 EOF
 
 # 3. Configure Claude Code hooks (~/.claude/settings.json)
-# Add: "hooks": { "stop": [{ "type": "command", "command": "claudible" }] }
+# Add: "hooks": { "SessionEnd": [{ "matcher": "", "hooks": [{ "type": "command", "command": "claudible" }] }] }
 
 # 4. Test it
 echo '{"session_id":"test","cwd":"/tmp","transcript_path":"","notification_type":"stop"}' | claudible --dry-run
@@ -488,7 +519,8 @@ The evaluator analyzes the last exchange and returns:
 ## CLI Reference
 
 ```
-claudible [flags]
+claudible [flags]              Process hook input from stdin
+claudible setup [flags]        Interactive setup wizard
 
 Flags:
   --config string   Custom config file path
@@ -496,11 +528,21 @@ Flags:
   --verbose         Enable verbose logging
   --version         Print version and exit
   --help            Show help
+
+Setup Flags:
+  --phone string    Phone number for iMessage (skip interactive prompt)
+  --verbose         Enable verbose output
 ```
 
 ### Examples
 
 ```bash
+# Interactive setup (recommended for first-time users)
+claudible setup
+
+# Non-interactive setup with phone number
+claudible setup --phone "+15551234567"
+
 # Normal operation (called by Claude Code hooks)
 claudible
 
@@ -655,6 +697,7 @@ claudible/
 │   ├── evaluator/          # LLM-based evaluation
 │   ├── router/             # Notification orchestration
 │   ├── notification/       # Message types
+│   ├── setup/              # Setup wizard for one-command install
 │   └── providers/          # Notification backends
 │       ├── imessage/       # AppleScript iMessage
 │       ├── sms/            # Twilio, Vonage, Plivo
