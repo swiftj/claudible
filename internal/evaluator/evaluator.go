@@ -372,14 +372,15 @@ func (e *Evaluator) parseResponse(response string) (*EvaluationResult, error) {
 	}
 
 	// Sanitize summary - strip any Markdown that slipped through
-	result.Summary = sanitizeSummary(result.Summary)
+	result.Summary = SanitizeSummary(result.Summary)
 
 	return &result, nil
 }
 
-// sanitizeSummary removes any Markdown or special formatting from the summary.
+// SanitizeSummary removes any Markdown or special formatting from the summary.
 // This is a safety net in case the LLM ignores formatting instructions.
-func sanitizeSummary(s string) string {
+// Exported for use by other packages (router fallback, providers).
+func SanitizeSummary(s string) string {
 	result := s
 
 	// Strip Markdown emphasis patterns (bold/italic) while keeping the text
@@ -436,13 +437,57 @@ func sanitizeSummary(s string) string {
 		result = strings.ReplaceAll(result, "  ", " ")
 	}
 
-	// Trim and enforce length limit (280 chars allows complete thoughts on mobile)
+	// Trim and enforce length limit (330 chars allows complete thoughts on mobile)
 	result = strings.TrimSpace(result)
-	if len(result) > 280 {
-		result = result[:277] + "..."
+	if len(result) > 330 {
+		result = smartTruncate(result, 330)
 	}
 
 	return result
+}
+
+// smartTruncate truncates text to maxLen by finding the previous sentence boundary
+// (period or line break) rather than using ellipsis mid-sentence.
+func smartTruncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+
+	// Look for the last period or line break within the limit
+	truncated := s[:maxLen]
+
+	// Find the last sentence boundary (period followed by space, or line break)
+	lastPeriod := strings.LastIndex(truncated, ". ")
+	lastNewline := strings.LastIndex(truncated, "\n")
+
+	// Use whichever boundary is later (closer to the end)
+	boundary := lastPeriod
+	if lastNewline > boundary {
+		boundary = lastNewline
+	}
+
+	// If we found a good boundary in the second half, use it
+	if boundary > maxLen/2 {
+		if truncated[boundary] == '.' {
+			return truncated[:boundary+1] // Include the period
+		}
+		return strings.TrimSpace(truncated[:boundary]) // Exclude newline, trim
+	}
+
+	// No good boundary found - look for standalone period at end of word
+	lastPeriodOnly := strings.LastIndex(truncated, ".")
+	if lastPeriodOnly > maxLen/2 {
+		return truncated[:lastPeriodOnly+1]
+	}
+
+	// Last resort: truncate at word boundary without ellipsis
+	lastSpace := strings.LastIndex(truncated, " ")
+	if lastSpace > maxLen/2 {
+		return strings.TrimSpace(truncated[:lastSpace])
+	}
+
+	// Absolute fallback: just trim to length
+	return strings.TrimSpace(truncated)
 }
 
 // stripEmphasis removes Markdown emphasis markers (like ** or _) while keeping the text.

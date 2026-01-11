@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/swiftj/claudible/internal/config"
+	"github.com/swiftj/claudible/internal/evaluator"
 	"github.com/swiftj/claudible/internal/logging"
 	"github.com/swiftj/claudible/internal/notification"
 )
@@ -137,9 +138,12 @@ func (p *Provider) Send(ctx context.Context, msg notification.NotificationMessag
 func (p *Provider) formatMessage(msg notification.NotificationMessage) string {
 	var builder strings.Builder
 
+	// Sanitize summary as safety net (strip any markdown that slipped through)
+	sanitizedSummary := evaluator.SanitizeSummary(msg.Summary)
+
 	// State and summary line
 	stateStr := strings.ToUpper(string(msg.State))
-	builder.WriteString(fmt.Sprintf("[%s] - %s", stateStr, msg.Summary))
+	builder.WriteString(fmt.Sprintf("[%s] - %s", stateStr, sanitizedSummary))
 
 	// Project line (just folder name, not full path)
 	if msg.Cwd != "" {
@@ -154,12 +158,55 @@ func (p *Provider) formatMessage(msg notification.NotificationMessage) string {
 
 	result := builder.String()
 
-	// Final truncation as safety net
+	// Final truncation using smart truncation (no ellipsis)
 	if len(result) > p.maxMessageLength {
-		result = result[:p.maxMessageLength-3] + "..."
+		result = smartTruncate(result, p.maxMessageLength)
 	}
 
 	return result
+}
+
+// smartTruncate truncates text to maxLen by finding the previous sentence boundary
+// (period or line break) rather than using ellipsis mid-sentence.
+func smartTruncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+
+	truncated := s[:maxLen]
+
+	// Find the last sentence boundary (period followed by space, or newline)
+	lastPeriod := strings.LastIndex(truncated, ". ")
+	lastNewline := strings.LastIndex(truncated, "\n")
+
+	// Use whichever boundary is later (closer to the end)
+	boundary := lastPeriod
+	if lastNewline > boundary {
+		boundary = lastNewline
+	}
+
+	// If we found a good boundary in the second half, use it
+	if boundary > maxLen/2 {
+		if truncated[boundary] == '.' {
+			return truncated[:boundary+1] // Include the period
+		}
+		return strings.TrimSpace(truncated[:boundary])
+	}
+
+	// Look for standalone period at end of word
+	lastPeriodOnly := strings.LastIndex(truncated, ".")
+	if lastPeriodOnly > maxLen/2 {
+		return truncated[:lastPeriodOnly+1]
+	}
+
+	// Last resort: truncate at word boundary without ellipsis
+	lastSpace := strings.LastIndex(truncated, " ")
+	if lastSpace > maxLen/2 {
+		return strings.TrimSpace(truncated[:lastSpace])
+	}
+
+	// Absolute fallback: just trim to length
+	return strings.TrimSpace(truncated)
 }
 
 // extractProjectName gets just the folder name from a full path.

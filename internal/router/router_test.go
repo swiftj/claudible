@@ -396,14 +396,28 @@ func TestTruncateSummary(t *testing.T) {
 		}
 	})
 
-	t.Run("truncates long string with ellipsis", func(t *testing.T) {
+	t.Run("truncates long string at word boundary (no ellipsis)", func(t *testing.T) {
 		input := "This is a very long string that should be truncated at some point"
 		result := truncateSummary(input, 30)
-		if len(result) > 33 { // 30 + "..."
-			t.Errorf("result too long: %d chars", len(result))
+		if len(result) > 30 {
+			t.Errorf("result too long: %d chars, got %q", len(result), result)
 		}
-		if !strings.HasSuffix(result, "...") {
-			t.Errorf("expected ellipsis at end, got %q", result)
+		// Smart truncation should NOT use ellipsis
+		if strings.HasSuffix(result, "...") {
+			t.Errorf("should not use ellipsis, got %q", result)
+		}
+	})
+
+	t.Run("truncates at sentence boundary when period is in second half", func(t *testing.T) {
+		// Period is at position 40, limit is 50, so period is at 80% (> 50% threshold)
+		input := "This is a longer first sentence that ends here. Then more text follows."
+		result := truncateSummary(input, 50)
+		// Should truncate at the period since it's past the midpoint
+		if len(result) > 50 {
+			t.Errorf("result too long: %d chars, got %q", len(result), result)
+		}
+		if !strings.HasSuffix(result, ".") {
+			t.Errorf("expected truncation at sentence boundary (ending with period), got %q", result)
 		}
 	})
 

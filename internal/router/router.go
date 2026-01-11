@@ -250,8 +250,8 @@ func (r *Router) generateTitle(s state.State) string {
 }
 
 // generateSummary creates a summary from the transcript and state.
-// Maximum summary length is 280 chars - fits well on mobile while allowing complete thoughts.
-const maxSummaryLength = 280
+// Maximum summary length is 330 chars - fits well on mobile while allowing complete thoughts.
+const maxSummaryLength = 330
 
 func (r *Router) generateSummary(t *transcript.Transcript, s state.State) string {
 	// First, try to get a meaningful summary from the last assistant response
@@ -268,28 +268,66 @@ func (r *Router) generateSummary(t *transcript.Transcript, s state.State) string
 	return s.Description()
 }
 
-// truncateSummary truncates a string to the specified length, adding ellipsis if needed.
+// truncateSummary sanitizes and truncates a string to the specified length.
+// It strips markdown formatting and uses smart truncation (sentence boundaries) instead of ellipsis.
 func truncateSummary(s string, maxLen int) string {
 	if maxLen <= 0 {
-		maxLen = 200 // Default maximum
+		maxLen = 330 // Default maximum
 	}
 
-	// Clean up the string - remove excessive whitespace
-	s = strings.TrimSpace(s)
-	s = strings.Join(strings.Fields(s), " ")
+	// First, sanitize any markdown formatting (this also handles whitespace cleanup)
+	s = evaluator.SanitizeSummary(s)
 
+	// If already within limit after sanitization, return as-is
 	if len(s) <= maxLen {
 		return s
 	}
 
-	// Try to truncate at a word boundary
-	truncated := s[:maxLen]
-	lastSpace := strings.LastIndex(truncated, " ")
-	if lastSpace > maxLen/2 {
-		truncated = truncated[:lastSpace]
+	// Smart truncate to sentence boundary (no ellipsis)
+	return smartTruncateText(s, maxLen)
+}
+
+// smartTruncateText truncates text to maxLen by finding the previous sentence boundary
+// (period or line break) rather than using ellipsis mid-sentence.
+func smartTruncateText(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
 	}
 
-	return truncated + "..."
+	truncated := s[:maxLen]
+
+	// Find the last sentence boundary (period followed by space, or newline)
+	lastPeriod := strings.LastIndex(truncated, ". ")
+	lastNewline := strings.LastIndex(truncated, "\n")
+
+	// Use whichever boundary is later (closer to the end)
+	boundary := lastPeriod
+	if lastNewline > boundary {
+		boundary = lastNewline
+	}
+
+	// If we found a good boundary in the second half, use it
+	if boundary > maxLen/2 {
+		if truncated[boundary] == '.' {
+			return truncated[:boundary+1] // Include the period
+		}
+		return strings.TrimSpace(truncated[:boundary])
+	}
+
+	// Look for standalone period at end of word
+	lastPeriodOnly := strings.LastIndex(truncated, ".")
+	if lastPeriodOnly > maxLen/2 {
+		return truncated[:lastPeriodOnly+1]
+	}
+
+	// Last resort: truncate at word boundary without ellipsis
+	lastSpace := strings.LastIndex(truncated, " ")
+	if lastSpace > maxLen/2 {
+		return strings.TrimSpace(truncated[:lastSpace])
+	}
+
+	// Absolute fallback: just trim to length
+	return strings.TrimSpace(truncated)
 }
 
 // truncateRequest extracts a concise request from the user prompt.
@@ -318,15 +356,13 @@ func truncateRequest(s string) string {
 		s = "[Continued session]"
 	}
 
-	// Final length truncation
+	// Sanitize any markdown
+	s = evaluator.SanitizeSummary(s)
 	s = strings.TrimSpace(s)
+
+	// Final length truncation using smart truncation (no ellipsis)
 	if len(s) > maxRequestLength {
-		// Try to break at word boundary
-		truncated := s[:maxRequestLength]
-		if lastSpace := strings.LastIndex(truncated, " "); lastSpace > maxRequestLength/2 {
-			truncated = truncated[:lastSpace]
-		}
-		return truncated + "..."
+		s = smartTruncateText(s, maxRequestLength)
 	}
 
 	return s
