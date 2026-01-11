@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -94,9 +95,10 @@ type EvaluatorConfig struct {
 
 // Behavior holds notification behavior settings.
 type Behavior struct {
-	NotifyOn         []string `yaml:"notify_on"`
-	MaxMessageLength int      `yaml:"max_message_length"`
-	IncludeRepoPath  bool     `yaml:"include_repo_path"`
+	NotifyOn         []string      `yaml:"notify_on"`
+	MaxMessageLength int           `yaml:"max_message_length"`
+	IncludeRepoPath  bool          `yaml:"include_repo_path"`
+	DedupeWindow     time.Duration `yaml:"dedupe_window"` // Time window for deduplication (default 30s)
 }
 
 // DefaultConfigPath returns the default configuration file path.
@@ -155,6 +157,7 @@ func Default() *Config {
 			NotifyOn:         []string{"complete", "waiting"},
 			MaxMessageLength: 900,
 			IncludeRepoPath:  true,
+			DedupeWindow:     30 * time.Second,
 		},
 		Evaluator: EvaluatorConfig{
 			Enabled:   false,

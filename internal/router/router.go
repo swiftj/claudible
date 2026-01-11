@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/swiftj/claudible/internal/config"
+	"github.com/swiftj/claudible/internal/dedup"
 	"github.com/swiftj/claudible/internal/evaluator"
 	"github.com/swiftj/claudible/internal/hook"
 	"github.com/swiftj/claudible/internal/notification"
@@ -25,10 +26,11 @@ import (
 // Router orchestrates the notification flow: receives hook input,
 // parses transcript, classifies state, and routes to enabled providers.
 type Router struct {
-	config     *config.Config
-	classifier *state.Classifier
-	registry   *notification.ProviderRegistry
-	evaluator  *evaluator.Evaluator
+	config       *config.Config
+	classifier   *state.Classifier
+	registry     *notification.ProviderRegistry
+	evaluator    *evaluator.Evaluator
+	deduplicator *dedup.Deduplicator
 }
 
 // NewRouter creates a new Router with providers initialized from configuration.
@@ -47,10 +49,11 @@ func NewRouter(cfg *config.Config) *Router {
 	}
 
 	r := &Router{
-		config:     cfg,
-		classifier: state.NewClassifier(),
-		registry:   notification.NewProviderRegistry(),
-		evaluator:  evaluator.NewEvaluator(evalConfig),
+		config:       cfg,
+		classifier:   state.NewClassifier(),
+		registry:     notification.NewProviderRegistry(),
+		evaluator:    evaluator.NewEvaluator(evalConfig),
+		deduplicator: dedup.New(cfg.Behavior.DedupeWindow),
 	}
 
 	// Initialize and register providers based on config
@@ -122,6 +125,12 @@ func (r *Router) Process(ctx context.Context, input *hook.HookInput) error {
 
 	// Build the notification message (use LLM summary if available)
 	msg := r.buildMessageWithSummary(input, t, classifiedState, summary)
+
+	// Check for duplicate notifications
+	if r.deduplicator != nil && !r.deduplicator.ShouldSend(msg) {
+		log.Printf("router: suppressing duplicate notification for session %q", input.SessionID)
+		return nil
+	}
 
 	// Send to all enabled providers
 	errors := r.registry.SendAll(ctx, msg)
