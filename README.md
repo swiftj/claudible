@@ -24,6 +24,12 @@ Claude Code → Hook Event → Claudible → Your Phone/Desktop
 - **Zero Claude Code modifications** — Uses the official hooks system
 - **Smart detection** — Optional AI-powered state classification
 
+<p align="center">
+  <img src="assets/ExampleNotification.png" alt="Claudible notification on iPhone" width="300">
+  <br>
+  <em>Get notified on your phone when Claude completes work</em>
+</p>
+
 ---
 
 ## Features
