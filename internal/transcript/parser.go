@@ -13,10 +13,81 @@ import (
 )
 
 // Entry represents a single message in a Claude Code transcript.
+// Claude Code uses a nested format where the actual role/content are inside a "message" field.
 type Entry struct {
-	Role      string    `json:"role"`                // "user" or "assistant"
-	Content   string    `json:"content"`             // Message content
-	Timestamp time.Time `json:"timestamp,omitempty"` // Optional timestamp
+	// Claude Code's actual format fields
+	Type      string       `json:"type"`              // "user", "assistant", "summary", "system", etc.
+	Message   *MessageBody `json:"message,omitempty"` // Nested message content
+	Timestamp time.Time    `json:"timestamp,omitempty"`
+
+	// Legacy/simple format fields (for backwards compatibility)
+	Role    string `json:"role"`    // Direct role field
+	Content string `json:"content"` // Direct content field
+}
+
+// MessageBody represents the nested message structure in Claude Code transcripts.
+type MessageBody struct {
+	Role    string      `json:"role"`    // "user" or "assistant"
+	Content interface{} `json:"content"` // Can be string or []ContentBlock
+}
+
+// ContentBlock represents a single content block in Claude Code's array format.
+type ContentBlock struct {
+	Type string `json:"type"` // "text", "tool_use", etc.
+	Text string `json:"text"` // The actual text content
+}
+
+// GetRole returns the role from either the nested message or legacy format.
+func (e *Entry) GetRole() string {
+	// Prefer the top-level Type field (Claude Code's actual format)
+	if e.Type == "user" || e.Type == "assistant" {
+		return e.Type
+	}
+	// Check nested message
+	if e.Message != nil && e.Message.Role != "" {
+		return e.Message.Role
+	}
+	// Fall back to legacy format
+	return e.Role
+}
+
+// GetContent extracts the text content from either format.
+func (e *Entry) GetContent() string {
+	// Try nested message format first (Claude Code's actual format)
+	if e.Message != nil {
+		return extractContent(e.Message.Content)
+	}
+	// Fall back to legacy direct content field
+	return e.Content
+}
+
+// extractContent handles both string and array content formats.
+func extractContent(content interface{}) string {
+	if content == nil {
+		return ""
+	}
+
+	// Handle direct string content
+	if str, ok := content.(string); ok {
+		return str
+	}
+
+	// Handle array of content blocks
+	if arr, ok := content.([]interface{}); ok {
+		var texts []string
+		for _, item := range arr {
+			if block, ok := item.(map[string]interface{}); ok {
+				if blockType, _ := block["type"].(string); blockType == "text" {
+					if text, ok := block["text"].(string); ok {
+						texts = append(texts, text)
+					}
+				}
+			}
+		}
+		return strings.Join(texts, "\n")
+	}
+
+	return ""
 }
 
 // Transcript represents a parsed Claude Code conversation.
@@ -80,9 +151,11 @@ func ParseReader(r io.Reader) (*Transcript, error) {
 			continue
 		}
 
-		// Skip entries without a role
-		if entry.Role == "" {
-			fmt.Fprintf(os.Stderr, "warning: skipping entry at line %d: missing role field\n", lineNum)
+		// Skip entries that aren't user or assistant messages
+		// Claude Code uses "type" field for message type, not "role"
+		role := entry.GetRole()
+		if role != "user" && role != "assistant" {
+			// Not a conversation entry (could be "summary", "system", "file-history-snapshot", etc.)
 			continue
 		}
 
@@ -104,8 +177,8 @@ func (t *Transcript) LastUserPrompt() string {
 	}
 
 	for i := len(t.Entries) - 1; i >= 0; i-- {
-		if t.Entries[i].Role == "user" {
-			return t.Entries[i].Content
+		if t.Entries[i].GetRole() == "user" {
+			return t.Entries[i].GetContent()
 		}
 	}
 
@@ -120,8 +193,8 @@ func (t *Transcript) LastAssistantResponse() string {
 	}
 
 	for i := len(t.Entries) - 1; i >= 0; i-- {
-		if t.Entries[i].Role == "assistant" {
-			return t.Entries[i].Content
+		if t.Entries[i].GetRole() == "assistant" {
+			return t.Entries[i].GetContent()
 		}
 	}
 
@@ -167,7 +240,7 @@ func (t *Transcript) UserEntries() []Entry {
 
 	var entries []Entry
 	for _, e := range t.Entries {
-		if e.Role == "user" {
+		if e.GetRole() == "user" {
 			entries = append(entries, e)
 		}
 	}
@@ -182,7 +255,7 @@ func (t *Transcript) AssistantEntries() []Entry {
 
 	var entries []Entry
 	for _, e := range t.Entries {
-		if e.Role == "assistant" {
+		if e.GetRole() == "assistant" {
 			entries = append(entries, e)
 		}
 	}

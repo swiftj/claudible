@@ -353,11 +353,11 @@ func TestUserEntries(t *testing.T) {
 
 	expectedContents := []string{"First user", "Second user", "Third user"}
 	for i, entry := range users {
-		if entry.Content != expectedContents[i] {
-			t.Errorf("user entry %d: got %q, want %q", i, entry.Content, expectedContents[i])
+		if entry.GetContent() != expectedContents[i] {
+			t.Errorf("user entry %d: got %q, want %q", i, entry.GetContent(), expectedContents[i])
 		}
-		if entry.Role != "user" {
-			t.Errorf("user entry %d: got role %q, want 'user'", i, entry.Role)
+		if entry.GetRole() != "user" {
+			t.Errorf("user entry %d: got role %q, want 'user'", i, entry.GetRole())
 		}
 	}
 }
@@ -380,11 +380,11 @@ func TestAssistantEntries(t *testing.T) {
 
 	expectedContents := []string{"First response", "Second response"}
 	for i, entry := range assistants {
-		if entry.Content != expectedContents[i] {
-			t.Errorf("assistant entry %d: got %q, want %q", i, entry.Content, expectedContents[i])
+		if entry.GetContent() != expectedContents[i] {
+			t.Errorf("assistant entry %d: got %q, want %q", i, entry.GetContent(), expectedContents[i])
 		}
-		if entry.Role != "assistant" {
-			t.Errorf("assistant entry %d: got role %q, want 'assistant'", i, entry.Role)
+		if entry.GetRole() != "assistant" {
+			t.Errorf("assistant entry %d: got role %q, want 'assistant'", i, entry.GetRole())
 		}
 	}
 }
@@ -405,5 +405,206 @@ func TestTimestampParsing(t *testing.T) {
 	expectedTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
 	if !entry.Timestamp.Equal(expectedTime) {
 		t.Errorf("got timestamp %v, want %v", entry.Timestamp, expectedTime)
+	}
+}
+
+// Tests for Claude Code's actual JSONL format
+func TestClaudeCodeFormat(t *testing.T) {
+	t.Run("nested message with string content", func(t *testing.T) {
+		content := `{"type":"user","message":{"role":"user","content":"Hello Claude"},"uuid":"123","timestamp":"2024-01-15T10:30:00Z"}
+{"type":"assistant","message":{"role":"assistant","content":"Hello! How can I help?"},"uuid":"456","timestamp":"2024-01-15T10:30:01Z"}`
+
+		transcript, err := ParseReader(strings.NewReader(content))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if transcript.Len() != 2 {
+			t.Errorf("got %d entries, want 2", transcript.Len())
+		}
+
+		if got := transcript.LastUserPrompt(); got != "Hello Claude" {
+			t.Errorf("LastUserPrompt() = %q, want %q", got, "Hello Claude")
+		}
+
+		if got := transcript.LastAssistantResponse(); got != "Hello! How can I help?" {
+			t.Errorf("LastAssistantResponse() = %q, want %q", got, "Hello! How can I help?")
+		}
+	})
+
+	t.Run("nested message with array content", func(t *testing.T) {
+		content := `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"What is 2+2?"}]},"uuid":"123"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"2+2 equals 4."}]},"uuid":"456"}`
+
+		transcript, err := ParseReader(strings.NewReader(content))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if transcript.Len() != 2 {
+			t.Errorf("got %d entries, want 2", transcript.Len())
+		}
+
+		if got := transcript.LastUserPrompt(); got != "What is 2+2?" {
+			t.Errorf("LastUserPrompt() = %q, want %q", got, "What is 2+2?")
+		}
+
+		if got := transcript.LastAssistantResponse(); got != "2+2 equals 4." {
+			t.Errorf("LastAssistantResponse() = %q, want %q", got, "2+2 equals 4.")
+		}
+	})
+
+	t.Run("mixed content types in array", func(t *testing.T) {
+		// Claude Code sometimes includes tool_use blocks alongside text
+		content := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Let me check that."},{"type":"tool_use","id":"123","name":"read_file"},{"type":"text","text":"Found it!"}]},"uuid":"789"}`
+
+		transcript, err := ParseReader(strings.NewReader(content))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Should extract only text blocks, joined with newlines
+		got := transcript.LastAssistantResponse()
+		want := "Let me check that.\nFound it!"
+		if got != want {
+			t.Errorf("LastAssistantResponse() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("skips non-conversation entries", func(t *testing.T) {
+		content := `{"type":"summary","summary":"Test session","leafUuid":"abc"}
+{"type":"system","message":{"role":"system","content":"You are helpful"}}
+{"type":"user","message":{"role":"user","content":"Hello"},"uuid":"123"}
+{"type":"file-history-snapshot","files":[]}
+{"type":"assistant","message":{"role":"assistant","content":"Hi!"},"uuid":"456"}`
+
+		transcript, err := ParseReader(strings.NewReader(content))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Should only have user and assistant entries
+		if transcript.Len() != 2 {
+			t.Errorf("got %d entries, want 2 (only user and assistant)", transcript.Len())
+		}
+	})
+
+	t.Run("real Claude Code format", func(t *testing.T) {
+		// Actual format from Claude Code transcripts
+		content := `{"parentUuid":null,"isSidechain":false,"userType":"external","cwd":"/test","sessionId":"abc-123","version":"2.1.4","gitBranch":"main","type":"user","message":{"role":"user","content":"Fix the bug"},"uuid":"user-1","timestamp":"2026-01-11T04:05:12.888Z"}
+{"parentUuid":"user-1","isSidechain":false,"userType":"external","cwd":"/test","sessionId":"abc-123","version":"2.1.4","gitBranch":"main","message":{"model":"claude-opus-4-5-20251101","id":"msg_123","type":"message","role":"assistant","content":[{"type":"text","text":"I successfully implemented the fix in main.go."}],"stop_reason":"end_turn"},"requestId":"req_123","type":"assistant","uuid":"asst-1","timestamp":"2026-01-11T04:05:17.004Z"}`
+
+		transcript, err := ParseReader(strings.NewReader(content))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if transcript.Len() != 2 {
+			t.Errorf("got %d entries, want 2", transcript.Len())
+		}
+
+		if got := transcript.LastUserPrompt(); got != "Fix the bug" {
+			t.Errorf("LastUserPrompt() = %q, want %q", got, "Fix the bug")
+		}
+
+		if got := transcript.LastAssistantResponse(); got != "I successfully implemented the fix in main.go." {
+			t.Errorf("LastAssistantResponse() = %q, want %q", got, "I successfully implemented the fix in main.go.")
+		}
+
+		// Should detect completion indicator ("successfully" and "implemented" are both indicators)
+		if !transcript.HasCompletionIndicators() {
+			t.Error("HasCompletionIndicators() = false, want true (contains 'successfully')")
+		}
+	})
+}
+
+func TestGetRoleAndContent(t *testing.T) {
+	t.Run("legacy format", func(t *testing.T) {
+		entry := Entry{Role: "user", Content: "Hello"}
+		if got := entry.GetRole(); got != "user" {
+			t.Errorf("GetRole() = %q, want %q", got, "user")
+		}
+		if got := entry.GetContent(); got != "Hello" {
+			t.Errorf("GetContent() = %q, want %q", got, "Hello")
+		}
+	})
+
+	t.Run("Claude Code format with Type", func(t *testing.T) {
+		entry := Entry{
+			Type: "assistant",
+			Message: &MessageBody{
+				Role:    "assistant",
+				Content: "Hi there",
+			},
+		}
+		if got := entry.GetRole(); got != "assistant" {
+			t.Errorf("GetRole() = %q, want %q", got, "assistant")
+		}
+		if got := entry.GetContent(); got != "Hi there" {
+			t.Errorf("GetContent() = %q, want %q", got, "Hi there")
+		}
+	})
+
+	t.Run("nil message", func(t *testing.T) {
+		entry := Entry{Type: "user"}
+		if got := entry.GetContent(); got != "" {
+			t.Errorf("GetContent() = %q, want empty string", got)
+		}
+	})
+}
+
+func TestExtractContent(t *testing.T) {
+	tests := []struct {
+		name    string
+		content interface{}
+		want    string
+	}{
+		{
+			name:    "nil content",
+			content: nil,
+			want:    "",
+		},
+		{
+			name:    "string content",
+			content: "Hello world",
+			want:    "Hello world",
+		},
+		{
+			name: "array with single text block",
+			content: []interface{}{
+				map[string]interface{}{"type": "text", "text": "Hello"},
+			},
+			want: "Hello",
+		},
+		{
+			name: "array with multiple text blocks",
+			content: []interface{}{
+				map[string]interface{}{"type": "text", "text": "First"},
+				map[string]interface{}{"type": "text", "text": "Second"},
+			},
+			want: "First\nSecond",
+		},
+		{
+			name: "array with non-text blocks filtered",
+			content: []interface{}{
+				map[string]interface{}{"type": "text", "text": "Text part"},
+				map[string]interface{}{"type": "tool_use", "name": "read_file"},
+			},
+			want: "Text part",
+		},
+		{
+			name:    "empty array",
+			content: []interface{}{},
+			want:    "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractContent(tt.content)
+			if got != tt.want {
+				t.Errorf("extractContent() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
