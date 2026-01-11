@@ -121,7 +121,7 @@ func Parse(path string) (*Transcript, error) {
 		}
 		return nil, fmt.Errorf("failed to open transcript: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	return ParseReader(file)
 }
@@ -134,6 +134,11 @@ func ParseReader(r io.Reader) (*Transcript, error) {
 	}
 
 	scanner := bufio.NewScanner(r)
+	// Increase buffer size to handle large transcript entries (tool results, code blocks, etc.)
+	// Default is 64KB, increase to 10MB to handle Claude Code's large tool outputs
+	const maxScanTokenSize = 10 * 1024 * 1024 // 10MB
+	buf := make([]byte, maxScanTokenSize)
+	scanner.Buffer(buf, maxScanTokenSize)
 	lineNum := 0
 
 	for scanner.Scan() {
@@ -185,8 +190,9 @@ func (t *Transcript) LastUserPrompt() string {
 	return ""
 }
 
-// LastAssistantResponse returns the content of the last assistant message in the transcript.
-// Returns an empty string if there are no assistant messages.
+// LastAssistantResponse returns the content of the last assistant message in the transcript
+// that contains actual text content. Tool-only entries (tool_use without text) are skipped.
+// Returns an empty string if there are no assistant messages with text content.
 func (t *Transcript) LastAssistantResponse() string {
 	if t == nil {
 		return ""
@@ -194,7 +200,11 @@ func (t *Transcript) LastAssistantResponse() string {
 
 	for i := len(t.Entries) - 1; i >= 0; i-- {
 		if t.Entries[i].GetRole() == "assistant" {
-			return t.Entries[i].GetContent()
+			content := t.Entries[i].GetContent()
+			// Skip entries with no text content (e.g., tool_use only)
+			if content != "" {
+				return content
+			}
 		}
 	}
 

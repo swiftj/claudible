@@ -16,7 +16,7 @@ import (
 
 const (
 	// DefaultMaxTokens is the default maximum tokens for LLM responses.
-	DefaultMaxTokens = 1000
+	DefaultMaxTokens = 1024
 
 	// DefaultTimeout is the default HTTP request timeout.
 	DefaultTimeout = 30 * time.Second
@@ -38,26 +38,26 @@ const (
 )
 
 // evaluationPromptTemplate is the prompt used to analyze Claude Code interactions.
-// The %s placeholders are: provider_names, user_request, assistant_response
-const evaluationPromptTemplate = `Analyze this Claude Code interaction and determine if the task is complete.
+// The %s placeholders are: user_request, assistant_response, provider_names
+const evaluationPromptTemplate = `You are a notification summarizer for mobile devices (%s).
+
+RULES:
+1. Summary: PLAIN TEXT only, 1-2 sentences, ~200 chars max
+2. FORBIDDEN: Markdown (## ** ` + "`" + `), tables (|), bullets (- *), code blocks, line breaks
+3. Allowed: Plain words, spaces, emojis (✅ ❌ ⏳ 🔧)
+4. Style: Conversational text message, not documentation
+
+GOOD: "✅ Added JWT auth and updated all tests. Ready to deploy."
+BAD: "## Summary\n- Added auth" (has markdown/bullets)
 
 User Request: %s
 
 Assistant Response: %s
 
-IMPORTANT FORMATTING RULES:
-- These summaries will be sent to: %s
-- Use PLAIN TEXT only - NO Markdown formatting (no ##, **, ---, |tables|, etc.)
-- Keep it concise: 1-2 sentences maximum
-- Emojis are OK and encouraged for status indicators (✅ ❌ ⏳ etc.)
-- No bullet points, numbered lists, or special formatting
+Respond with ONLY JSON:
+{"state":"complete|waiting|needs_review","summary":"1-2 sentence summary","confidence":0.0-1.0}
 
-Respond with JSON only:
-{"state": "complete|waiting|needs_review", "summary": "plain text summary with optional emojis", "confidence": 0.0-1.0}
-
-- complete: The assistant finished the requested work
-- waiting: The assistant is asking a question or needs user input
-- needs_review: Work done but may need human verification`
+States: complete=finished, waiting=needs input, needs_review=done but verify`
 
 // EvaluationResult contains the LLM's assessment of the interaction state.
 type EvaluationResult struct {
@@ -72,7 +72,7 @@ type Config struct {
 	Provider  string `yaml:"provider"` // anthropic, openai
 	APIKey    string `yaml:"api_key"`
 	Model     string `yaml:"model"`      // claude-3-haiku-20240307, gpt-4o-mini
-	MaxTokens int    `yaml:"max_tokens"` // default 256
+	MaxTokens int    `yaml:"max_tokens"` // default 1024
 }
 
 // Evaluator uses an LLM to analyze Claude Code interactions and determine completion state.
@@ -147,7 +147,14 @@ func (e *Evaluator) Evaluate(ctx context.Context, userRequest, assistantResponse
 		providerHint = strings.Join(providers, ", ")
 	}
 
-	prompt := fmt.Sprintf(evaluationPromptTemplate, userRequest, assistantResponse, providerHint)
+	// Truncate assistant response to avoid token limits (keep first 2000 chars)
+	truncatedResponse := assistantResponse
+	if len(truncatedResponse) > 2000 {
+		truncatedResponse = truncatedResponse[:2000] + "..."
+	}
+
+	// Template order: providerHint, userRequest, truncatedResponse
+	prompt := fmt.Sprintf(evaluationPromptTemplate, providerHint, userRequest, truncatedResponse)
 
 	var response string
 	var err error
@@ -364,5 +371,98 @@ func (e *Evaluator) parseResponse(response string) (*EvaluationResult, error) {
 		result.Confidence = 1
 	}
 
+	// Sanitize summary - strip any Markdown that slipped through
+	result.Summary = sanitizeSummary(result.Summary)
+
 	return &result, nil
+}
+
+// sanitizeSummary removes any Markdown or special formatting from the summary.
+// This is a safety net in case the LLM ignores formatting instructions.
+func sanitizeSummary(s string) string {
+	result := s
+
+	// Strip Markdown emphasis patterns (bold/italic) while keeping the text
+	// Order matters: process longer patterns first
+	result = stripEmphasis(result, "***") // Bold+italic
+	result = stripEmphasis(result, "___") // Bold+italic alt
+	result = stripEmphasis(result, "**")  // Bold
+	result = stripEmphasis(result, "__")  // Bold alt (when used for emphasis)
+	result = stripEmphasis(result, "*")   // Italic
+	result = stripEmphasis(result, "_")   // Italic alt
+
+	// Remove other common Markdown patterns
+	replacements := []struct {
+		old string
+		new string
+	}{
+		{"##", ""},    // Headers
+		{"~~", ""},    // Strikethrough markers (text already handled by stripEmphasis logic)
+		{"```", ""},   // Code blocks
+		{"`", ""},     // Inline code
+		{"---", ""},   // Horizontal rule
+		{"* ", ""},    // Bullet points (note: space after to avoid hitting emphasis)
+		{"- ", ""},    // Bullet points alt
+		{"• ", ""},    // Unicode bullet
+		{"\n", " "},   // Newlines to spaces
+		{"\r", ""},    // Carriage returns
+		{"\t", " "},   // Tabs to spaces
+	}
+
+	for _, r := range replacements {
+		result = strings.ReplaceAll(result, r.old, r.new)
+	}
+
+	// Handle strikethrough ~~text~~ pattern
+	result = stripEmphasis(result, "~~")
+
+	// Remove table-like patterns (pipes with content)
+	if strings.Contains(result, "|") {
+		parts := strings.Split(result, "|")
+		var cleanParts []string
+		for _, part := range parts {
+			trimmed := strings.TrimSpace(part)
+			if trimmed != "" && !strings.HasPrefix(trimmed, "-") && !strings.HasPrefix(trimmed, "=") {
+				cleanParts = append(cleanParts, trimmed)
+			}
+		}
+		if len(cleanParts) > 0 {
+			result = strings.Join(cleanParts, " - ")
+		}
+	}
+
+	// Collapse multiple spaces
+	for strings.Contains(result, "  ") {
+		result = strings.ReplaceAll(result, "  ", " ")
+	}
+
+	// Trim and enforce length limit (280 chars allows complete thoughts on mobile)
+	result = strings.TrimSpace(result)
+	if len(result) > 280 {
+		result = result[:277] + "..."
+	}
+
+	return result
+}
+
+// stripEmphasis removes Markdown emphasis markers (like ** or _) while keeping the text.
+// For example: "**bold**" -> "bold", "_italic_" -> "italic"
+func stripEmphasis(s, marker string) string {
+	for {
+		start := strings.Index(s, marker)
+		if start == -1 {
+			break
+		}
+		end := strings.Index(s[start+len(marker):], marker)
+		if end == -1 {
+			// Unmatched marker, just remove it
+			s = s[:start] + s[start+len(marker):]
+			continue
+		}
+		// Found matching pair - remove both markers, keep content
+		end = start + len(marker) + end
+		content := s[start+len(marker) : end]
+		s = s[:start] + content + s[end+len(marker):]
+	}
+	return s
 }

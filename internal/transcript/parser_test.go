@@ -197,6 +197,28 @@ func TestLastAssistantResponse(t *testing.T) {
 			content: "",
 			want:    "",
 		},
+		{
+			name: "skip tool_use only entries (Claude Code format)",
+			content: `{"type": "user", "message": {"role": "user", "content": "Hello"}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "I will help you."}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "123", "name": "Read"}]}}`,
+			want: "I will help you.",
+		},
+		{
+			name: "multiple tool_use entries before text",
+			content: `{"type": "user", "message": {"role": "user", "content": "Hello"}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "First text response"}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "1", "name": "Bash"}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "2", "name": "Read"}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "3", "name": "Edit"}]}}`,
+			want: "First text response",
+		},
+		{
+			name: "text entry after tool_use entries",
+			content: `{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "1", "name": "Bash"}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Task complete!"}]}}`,
+			want: "Task complete!",
+		},
 	}
 
 	for _, tt := range tests {

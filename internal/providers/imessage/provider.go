@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/swiftj/claudible/internal/config"
+	"github.com/swiftj/claudible/internal/logging"
 	"github.com/swiftj/claudible/internal/notification"
 )
 
@@ -100,24 +101,39 @@ func (p *Provider) Send(ctx context.Context, msg notification.NotificationMessag
 		outputStr := strings.TrimSpace(string(output))
 		if strings.Contains(outputStr, "Application isn't running") ||
 			strings.Contains(outputStr, "not running") {
-			return fmt.Errorf("Messages.app is not running: please open Messages.app to send iMessage notifications")
+			logging.Error("iMessage send failed",
+				"reason", "Messages.app not running",
+				"target", p.target)
+			return fmt.Errorf("messages.app is not running: please open Messages.app to send iMessage notifications")
 		}
 		if strings.Contains(outputStr, "Can't get buddy") ||
 			strings.Contains(outputStr, "Invalid index") {
+			logging.Error("iMessage send failed",
+				"reason", "invalid target",
+				"target", p.target,
+				"output", outputStr)
 			return fmt.Errorf("invalid iMessage target %q: ensure the phone number or email is correct and registered with iMessage", p.target)
 		}
 		if strings.Contains(outputStr, "iMessage") && strings.Contains(outputStr, "service") {
+			logging.Error("iMessage send failed",
+				"reason", "service unavailable",
+				"output", outputStr)
 			return fmt.Errorf("iMessage service not available: ensure you are signed into iMessage in Messages.app")
 		}
 
+		logging.Error("iMessage send failed",
+			"error", err,
+			"output", outputStr)
 		return fmt.Errorf("failed to send iMessage: %w (output: %s)", err, outputStr)
 	}
 
+	logging.Debug("iMessage sent", "target", p.target)
 	return nil
 }
 
 // formatMessage creates the notification message text from the NotificationMessage.
-// Format: "[State] - Summary\nProject: cwd\nRequest: last user prompt"
+// Format: "[State] - Summary\nProject: folder_name\nRequest: truncated_prompt"
+// Optimized for mobile display with concise output.
 func (p *Provider) formatMessage(msg notification.NotificationMessage) string {
 	var builder strings.Builder
 
@@ -125,24 +141,44 @@ func (p *Provider) formatMessage(msg notification.NotificationMessage) string {
 	stateStr := strings.ToUpper(string(msg.State))
 	builder.WriteString(fmt.Sprintf("[%s] - %s", stateStr, msg.Summary))
 
-	// Project line (cwd)
+	// Project line (just folder name, not full path)
 	if msg.Cwd != "" {
-		builder.WriteString(fmt.Sprintf("\nProject: %s", msg.Cwd))
+		projectName := extractProjectName(msg.Cwd)
+		builder.WriteString(fmt.Sprintf("\nProject: %s", projectName))
 	}
 
-	// Request line (last user prompt)
-	if msg.Request != "" {
+	// Request line (last user prompt) - only if meaningful
+	if msg.Request != "" && msg.Request != "[Continued session]" {
 		builder.WriteString(fmt.Sprintf("\nRequest: %s", msg.Request))
 	}
 
 	result := builder.String()
 
-	// Truncate if necessary
+	// Final truncation as safety net
 	if len(result) > p.maxMessageLength {
 		result = result[:p.maxMessageLength-3] + "..."
 	}
 
 	return result
+}
+
+// extractProjectName gets just the folder name from a full path.
+func extractProjectName(path string) string {
+	// Get the last component of the path
+	if path == "" {
+		return ""
+	}
+
+	// Handle trailing slashes
+	path = strings.TrimSuffix(path, "/")
+	path = strings.TrimSuffix(path, "\\")
+
+	// Find the last separator
+	if idx := strings.LastIndexAny(path, "/\\"); idx >= 0 {
+		return path[idx+1:]
+	}
+
+	return path
 }
 
 // buildAppleScript creates the AppleScript command to send an iMessage.

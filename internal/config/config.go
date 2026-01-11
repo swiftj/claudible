@@ -157,14 +157,14 @@ func Default() *Config {
 			NotifyOn:         []string{"complete", "waiting"},
 			MaxMessageLength: 900,
 			IncludeRepoPath:  true,
-			DedupeWindow:     30 * time.Second,
+			DedupeWindow:     2 * time.Minute, // Match dedup.DefaultWindow
 		},
 		Evaluator: EvaluatorConfig{
 			Enabled:   false,
 			Provider:  "",
 			APIKey:    "",
 			Model:     "",
-			MaxTokens: 1000,
+			MaxTokens: 1024,
 		},
 	}
 }

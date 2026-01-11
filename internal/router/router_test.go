@@ -80,7 +80,7 @@ func TestNewRouter(t *testing.T) {
 		cfg := config.Default()
 		cfg.Behavior.NotifyOn = []string{"complete"}
 
-		r := NewRouter(cfg)
+		r := NewRouterForTesting(cfg)
 
 		if r.config != cfg {
 			t.Error("expected custom config to be used")
@@ -89,7 +89,7 @@ func TestNewRouter(t *testing.T) {
 
 	t.Run("registers all providers", func(t *testing.T) {
 		cfg := config.Default()
-		r := NewRouter(cfg)
+		r := NewRouterForTesting(cfg)
 
 		// Should have 6 providers registered (imessage, http, sms, desktop, pushover, pushbullet)
 		if r.registry.Count() != 6 {
@@ -101,7 +101,7 @@ func TestNewRouter(t *testing.T) {
 func TestRouter_Process(t *testing.T) {
 	t.Run("returns error for nil input", func(t *testing.T) {
 		cfg := config.Default()
-		r := NewRouter(cfg)
+		r := NewRouterForTesting(cfg)
 
 		err := r.Process(context.Background(), nil)
 		if err == nil {
@@ -114,7 +114,7 @@ func TestRouter_Process(t *testing.T) {
 
 	t.Run("returns error for missing transcript", func(t *testing.T) {
 		cfg := config.Default()
-		r := NewRouter(cfg)
+		r := NewRouterForTesting(cfg)
 
 		input := &hook.HookInput{
 			SessionID:      "test-session",
@@ -132,7 +132,7 @@ func TestRouter_Process(t *testing.T) {
 		cfg := config.Default()
 		cfg.Behavior.NotifyOn = []string{"complete"} // Only notify on complete
 
-		r := NewRouter(cfg)
+		r := NewRouterForTesting(cfg)
 
 		// Replace registry with mock providers
 		r.registry = notification.NewProviderRegistry()
@@ -166,7 +166,7 @@ func TestRouter_Process(t *testing.T) {
 		cfg := config.Default()
 		cfg.Behavior.NotifyOn = []string{"complete"}
 
-		r := NewRouter(cfg)
+		r := NewRouterForTesting(cfg)
 
 		// Replace registry with mock providers
 		r.registry = notification.NewProviderRegistry()
@@ -224,7 +224,7 @@ func TestRouter_Process(t *testing.T) {
 		cfg := config.Default()
 		cfg.Behavior.NotifyOn = []string{"complete"}
 
-		r := NewRouter(cfg)
+		r := NewRouterForTesting(cfg)
 
 		// Replace registry with mock providers
 		r.registry = notification.NewProviderRegistry()
@@ -262,7 +262,7 @@ func TestRouter_Process(t *testing.T) {
 		cfg := config.Default()
 		cfg.Behavior.NotifyOn = []string{"complete"}
 
-		r := NewRouter(cfg)
+		r := NewRouterForTesting(cfg)
 
 		// Replace registry with only failing providers
 		r.registry = notification.NewProviderRegistry()
@@ -289,7 +289,7 @@ func TestRouter_Process(t *testing.T) {
 
 	t.Run("respects context cancellation", func(t *testing.T) {
 		cfg := config.Default()
-		r := NewRouter(cfg)
+		r := NewRouterForTesting(cfg)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // Cancel immediately
@@ -309,7 +309,7 @@ func TestRouter_Process(t *testing.T) {
 
 func TestRouter_buildMessage(t *testing.T) {
 	cfg := config.Default()
-	r := NewRouter(cfg)
+	r := NewRouterForTesting(cfg)
 
 	t.Run("builds message with all fields", func(t *testing.T) {
 		transcriptContent := `{"role":"user","content":"please fix the bug"}
@@ -428,7 +428,7 @@ func TestRouter_handleProviderErrors(t *testing.T) {
 	cfg := config.Default()
 
 	t.Run("returns nil for no errors", func(t *testing.T) {
-		r := NewRouter(cfg)
+		r := NewRouterForTesting(cfg)
 		r.registry = notification.NewProviderRegistry()
 		mock := newMockProvider("test", true)
 		r.registry.Register(mock)
@@ -440,7 +440,7 @@ func TestRouter_handleProviderErrors(t *testing.T) {
 	})
 
 	t.Run("returns nil when some providers succeed", func(t *testing.T) {
-		r := NewRouter(cfg)
+		r := NewRouterForTesting(cfg)
 		r.registry = notification.NewProviderRegistry()
 		r.registry.Register(newMockProvider("p1", true))
 		r.registry.Register(newMockProvider("p2", true))
@@ -457,7 +457,7 @@ func TestRouter_handleProviderErrors(t *testing.T) {
 	})
 
 	t.Run("returns error when all providers fail", func(t *testing.T) {
-		r := NewRouter(cfg)
+		r := NewRouterForTesting(cfg)
 		r.registry = notification.NewProviderRegistry()
 		r.registry.Register(newMockProvider("p1", true))
 		r.registry.Register(newMockProvider("p2", true))
@@ -477,7 +477,7 @@ func TestRouter_handleProviderErrors(t *testing.T) {
 
 func TestRouter_Accessors(t *testing.T) {
 	cfg := config.Default()
-	r := NewRouter(cfg)
+	r := NewRouterForTesting(cfg)
 
 	t.Run("Registry returns registry", func(t *testing.T) {
 		if r.Registry() == nil {
@@ -507,7 +507,7 @@ func TestRouter_Integration(t *testing.T) {
 		cfg := config.Default()
 		cfg.Behavior.NotifyOn = []string{"complete", "waiting"}
 
-		r := NewRouter(cfg)
+		r := NewRouterForTesting(cfg)
 
 		// Replace with mock provider
 		r.registry = notification.NewProviderRegistry()
@@ -556,7 +556,7 @@ func BenchmarkRouter_Process(b *testing.B) {
 	cfg := config.Default()
 	cfg.Behavior.NotifyOn = []string{"complete"}
 
-	r := NewRouter(cfg)
+	r := NewRouterForTesting(cfg)
 
 	// Use a no-op mock provider
 	r.registry = notification.NewProviderRegistry()
@@ -591,7 +591,7 @@ func TestRouter_Timeout(t *testing.T) {
 	cfg := config.Default()
 	cfg.Behavior.NotifyOn = []string{"complete"}
 
-	r := NewRouter(cfg)
+	r := NewRouterForTesting(cfg)
 
 	// Create a slow provider
 	r.registry = notification.NewProviderRegistry()
@@ -650,7 +650,7 @@ func TestRouter_classifyState(t *testing.T) {
 	t.Run("uses heuristics when evaluator disabled", func(t *testing.T) {
 		cfg := config.Default()
 		cfg.Evaluator.Enabled = false
-		r := NewRouter(cfg)
+		r := NewRouterForTesting(cfg)
 
 		// Create transcript
 		transcriptContent := `{"role":"user","content":"fix the bug"}
@@ -679,7 +679,7 @@ func TestRouter_classifyState(t *testing.T) {
 		cfg.Evaluator.Enabled = true
 		cfg.Evaluator.Provider = "anthropic"
 		cfg.Evaluator.APIKey = "" // No API key
-		r := NewRouter(cfg)
+		r := NewRouterForTesting(cfg)
 
 		transcriptContent := `{"role":"user","content":"help me"}
 {"role":"assistant","content":"Here's the answer"}`
@@ -707,7 +707,7 @@ func TestRouter_classifyState(t *testing.T) {
 		cfg.Evaluator.Enabled = true
 		cfg.Evaluator.Provider = "anthropic"
 		cfg.Evaluator.APIKey = "test-key"
-		r := NewRouter(cfg)
+		r := NewRouterForTesting(cfg)
 
 		input := &hook.HookInput{
 			HookEventName: "Stop",
@@ -727,7 +727,7 @@ func TestRouter_classifyState(t *testing.T) {
 
 func TestRouter_mapEvaluatorState(t *testing.T) {
 	cfg := config.Default()
-	r := NewRouter(cfg)
+	r := NewRouterForTesting(cfg)
 
 	tests := []struct {
 		evalState string
@@ -752,7 +752,7 @@ func TestRouter_mapEvaluatorState(t *testing.T) {
 
 func TestRouter_buildMessageWithSummary(t *testing.T) {
 	cfg := config.Default()
-	r := NewRouter(cfg)
+	r := NewRouterForTesting(cfg)
 
 	t.Run("uses LLM summary when provided", func(t *testing.T) {
 		transcriptContent := `{"role":"user","content":"test"}
@@ -801,7 +801,7 @@ func TestRouter_Evaluator(t *testing.T) {
 		cfg.Evaluator.APIKey = "test-key"
 		cfg.Evaluator.Model = "claude-3-haiku-20240307"
 
-		r := NewRouter(cfg)
+		r := NewRouterForTesting(cfg)
 
 		if r.evaluator == nil {
 			t.Error("expected evaluator to be created")
@@ -815,7 +815,7 @@ func TestRouter_Evaluator(t *testing.T) {
 		cfg := config.Default()
 		cfg.Evaluator.Enabled = false
 
-		r := NewRouter(cfg)
+		r := NewRouterForTesting(cfg)
 
 		if r.evaluator == nil {
 			t.Error("expected evaluator to be created (even if disabled)")

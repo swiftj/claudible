@@ -2,11 +2,17 @@
 // Claude Code often fires multiple hook events in quick succession (e.g., Stop + idle_prompt)
 // that result in essentially duplicate notifications. This package suppresses duplicates
 // within a configurable time window.
+//
+// IMPORTANT: Dedup state is persisted to a file so it survives across process invocations.
+// Each claudible invocation is a separate process, so in-memory state would be lost.
 package dedup
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -17,39 +23,71 @@ import (
 const (
 	// DefaultWindow is the default time window for deduplication.
 	// Notifications with similar content within this window are considered duplicates.
-	DefaultWindow = 30 * time.Second
+	// Set to 2 minutes because Claude Code can fire multiple hook events (Stop, Notification)
+	// up to 1-2 minutes apart for the same work session.
+	DefaultWindow = 2 * time.Minute
 
 	// DefaultCleanupInterval is how often to clean up expired entries.
-	DefaultCleanupInterval = 1 * time.Minute
+	DefaultCleanupInterval = 3 * time.Minute
+
+	// stateFileName is the name of the file used to persist dedup state.
+	stateFileName = "dedup_state.json"
 )
 
 // Deduplicator tracks recent notifications and suppresses duplicates.
 type Deduplicator struct {
-	mu       sync.Mutex
-	window   time.Duration
-	recent   map[string]*recentEntry
-	stopChan chan struct{}
+	mu        sync.Mutex
+	window    time.Duration
+	recent    map[string]*recentEntry
+	stopChan  chan struct{}
+	statePath string // Path to persist state file
 }
 
 // recentEntry tracks a recently sent notification.
 type recentEntry struct {
-	hash      string
-	state     state.State
-	timestamp time.Time
-	summary   string
+	Hash      string      `json:"hash"`
+	State     state.State `json:"state"`
+	Timestamp time.Time   `json:"timestamp"`
+	Summary   string      `json:"summary"`
+}
+
+// persistedState is the JSON structure saved to disk.
+type persistedState struct {
+	Entries map[string]*recentEntry `json:"entries"`
 }
 
 // New creates a new Deduplicator with the specified time window.
 // If window is 0, DefaultWindow is used.
+// State is loaded from disk if available, enabling dedup across process invocations.
 func New(window time.Duration) *Deduplicator {
+	return NewWithPersistence(window, true)
+}
+
+// NewWithPersistence creates a new Deduplicator with optional persistence.
+// Use persist=false for testing to avoid cross-test contamination.
+func NewWithPersistence(window time.Duration, persist bool) *Deduplicator {
 	if window <= 0 {
 		window = DefaultWindow
 	}
 
+	// Determine state file path (~/.config/claudible/dedup_state.json)
+	statePath := ""
+	if persist {
+		if homeDir, err := os.UserHomeDir(); err == nil {
+			statePath = filepath.Join(homeDir, ".config", "claudible", stateFileName)
+		}
+	}
+
 	d := &Deduplicator{
-		window:   window,
-		recent:   make(map[string]*recentEntry),
-		stopChan: make(chan struct{}),
+		window:    window,
+		recent:    make(map[string]*recentEntry),
+		stopChan:  make(chan struct{}),
+		statePath: statePath,
+	}
+
+	// Load persisted state from disk (only if persistence enabled)
+	if persist {
+		d.loadState()
 	}
 
 	// Start background cleanup goroutine
@@ -78,16 +116,23 @@ func (d *Deduplicator) cleanupLoop() {
 	}
 }
 
-// cleanup removes expired entries from the recent map.
+// cleanup removes expired entries from the recent map and persists state.
 func (d *Deduplicator) cleanup() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	now := time.Now()
+	changed := false
 	for key, entry := range d.recent {
-		if now.Sub(entry.timestamp) > d.window {
+		if now.Sub(entry.Timestamp) > d.window {
 			delete(d.recent, key)
+			changed = true
 		}
+	}
+
+	// Persist state after cleanup if anything changed
+	if changed {
+		d.saveStateLocked()
 	}
 }
 
@@ -114,15 +159,15 @@ func (d *Deduplicator) ShouldSend(msg notification.NotificationMessage) bool {
 	now := time.Now()
 	entry, exists := d.recent[key]
 
-	if exists && now.Sub(entry.timestamp) <= d.window {
+	if exists && now.Sub(entry.Timestamp) <= d.window {
 		// We have a recent notification for this session
 
 		// Primary check: same request = same work, likely duplicate
-		if entry.hash == requestHash {
+		if entry.Hash == requestHash {
 			// Same work detected within the time window
 
 			// If we already sent a COMPLETE, always suppress subsequent messages
-			if entry.state == state.StateComplete {
+			if entry.State == state.StateComplete {
 				return false
 			}
 
@@ -137,11 +182,14 @@ func (d *Deduplicator) ShouldSend(msg notification.NotificationMessage) bool {
 
 	// New notification or different work - record and allow
 	d.recent[key] = &recentEntry{
-		hash:      requestHash,
-		state:     msg.State,
-		timestamp: now,
-		summary:   msg.Summary,
+		Hash:      requestHash,
+		State:     msg.State,
+		Timestamp: now,
+		Summary:   msg.Summary,
 	}
+
+	// Persist state after recording new entry
+	d.saveStateLocked()
 
 	return true
 }
@@ -160,73 +208,6 @@ func (d *Deduplicator) hashRequest(msg notification.NotificationMessage) string 
 	return hex.EncodeToString(hash[:8]) // First 8 bytes is enough
 }
 
-// hashContent creates a hash of the notification content for exact duplicate detection.
-func (d *Deduplicator) hashContent(msg notification.NotificationMessage) string {
-	// Hash the summary and request together (these identify the "work")
-	content := msg.Summary + "|" + msg.Request
-	hash := sha256.Sum256([]byte(content))
-	return hex.EncodeToString(hash[:8]) // First 8 bytes is enough
-}
-
-// isSimilarContent checks if two summaries are similar enough to be considered duplicates.
-// This handles cases where the LLM generates slightly different summaries for the same work.
-func (d *Deduplicator) isSimilarContent(a, b string) bool {
-	// If either is empty, not similar
-	if a == "" || b == "" {
-		return false
-	}
-
-	// Exact match
-	if a == b {
-		return true
-	}
-
-	// Check for high overlap using simple heuristics:
-	// If one is a prefix/suffix of the other (within reason), consider similar
-	minLen := len(a)
-	if len(b) < minLen {
-		minLen = len(b)
-	}
-
-	// If the shorter string is at least 50 chars and is contained in the longer, similar
-	if minLen >= 50 {
-		if len(a) > len(b) && contains(a, b) {
-			return true
-		}
-		if len(b) > len(a) && contains(b, a) {
-			return true
-		}
-	}
-
-	// Check for common prefix (at least 60% overlap)
-	commonPrefix := 0
-	for i := 0; i < minLen && a[i] == b[i]; i++ {
-		commonPrefix++
-	}
-
-	if float64(commonPrefix)/float64(minLen) >= 0.6 {
-		return true
-	}
-
-	return false
-}
-
-// contains checks if s contains substr (simple implementation).
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(len(s) > 0 && len(substr) > 0 && findSubstring(s, substr) >= 0))
-}
-
-// findSubstring finds the index of substr in s, or -1 if not found.
-func findSubstring(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
-}
-
 // RecordSent records that a notification was sent (for external tracking).
 // This is useful when the caller wants to record a send without going through ShouldSend.
 func (d *Deduplicator) RecordSent(msg notification.NotificationMessage) {
@@ -242,11 +223,14 @@ func (d *Deduplicator) RecordSent(msg notification.NotificationMessage) {
 	}
 
 	d.recent[key] = &recentEntry{
-		hash:      d.hashRequest(msg),
-		state:     msg.State,
-		timestamp: time.Now(),
-		summary:   msg.Summary,
+		Hash:      d.hashRequest(msg),
+		State:     msg.State,
+		Timestamp: time.Now(),
+		Summary:   msg.Summary,
 	}
+
+	// Persist state
+	d.saveStateLocked()
 }
 
 // Clear removes all tracked notifications (useful for testing).
@@ -254,4 +238,66 @@ func (d *Deduplicator) Clear() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.recent = make(map[string]*recentEntry)
+	d.saveStateLocked()
+}
+
+// loadState loads the persisted dedup state from disk.
+// If the file doesn't exist or is invalid, it starts fresh.
+func (d *Deduplicator) loadState() {
+	if d.statePath == "" {
+		return
+	}
+
+	data, err := os.ReadFile(d.statePath)
+	if err != nil {
+		// File doesn't exist or can't be read, start fresh
+		return
+	}
+
+	var persisted persistedState
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		// Invalid JSON, start fresh
+		return
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	// Load entries, but only if they haven't expired
+	now := time.Now()
+	for key, entry := range persisted.Entries {
+		if now.Sub(entry.Timestamp) <= d.window {
+			d.recent[key] = entry
+		}
+	}
+}
+
+// saveStateLocked persists the current dedup state to disk.
+// Must be called with d.mu held.
+func (d *Deduplicator) saveStateLocked() {
+	if d.statePath == "" {
+		return
+	}
+
+	persisted := persistedState{
+		Entries: d.recent,
+	}
+
+	data, err := json.Marshal(persisted)
+	if err != nil {
+		return
+	}
+
+	// Ensure directory exists
+	dir := filepath.Dir(d.statePath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return
+	}
+
+	// Write atomically by writing to temp file then renaming
+	tmpPath := d.statePath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return
+	}
+	_ = os.Rename(tmpPath, d.statePath)
 }

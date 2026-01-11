@@ -5,13 +5,13 @@ package router
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/swiftj/claudible/internal/config"
 	"github.com/swiftj/claudible/internal/dedup"
 	"github.com/swiftj/claudible/internal/evaluator"
 	"github.com/swiftj/claudible/internal/hook"
+	"github.com/swiftj/claudible/internal/logging"
 	"github.com/swiftj/claudible/internal/notification"
 	"github.com/swiftj/claudible/internal/providers/desktop"
 	"github.com/swiftj/claudible/internal/providers/http"
@@ -35,6 +35,17 @@ type Router struct {
 
 // NewRouter creates a new Router with providers initialized from configuration.
 func NewRouter(cfg *config.Config) *Router {
+	return newRouter(cfg, true)
+}
+
+// NewRouterForTesting creates a Router without persistent dedup state.
+// This prevents cross-test contamination in unit tests.
+func NewRouterForTesting(cfg *config.Config) *Router {
+	return newRouter(cfg, false)
+}
+
+// newRouter is the internal constructor with dedup persistence control.
+func newRouter(cfg *config.Config, persistDedup bool) *Router {
 	if cfg == nil {
 		cfg = config.Default()
 	}
@@ -53,7 +64,7 @@ func NewRouter(cfg *config.Config) *Router {
 		classifier:   state.NewClassifier(),
 		registry:     notification.NewProviderRegistry(),
 		evaluator:    evaluator.NewEvaluator(evalConfig),
-		deduplicator: dedup.New(cfg.Behavior.DedupeWindow),
+		deduplicator: dedup.NewWithPersistence(cfg.Behavior.DedupeWindow, persistDedup),
 	}
 
 	// Initialize and register providers based on config
@@ -119,7 +130,7 @@ func (r *Router) Process(ctx context.Context, input *hook.HookInput) error {
 
 	// Check if we should notify on this state
 	if !r.config.ShouldNotifyOn(classifiedState.String()) {
-		log.Printf("router: skipping notification for state %q (not in notify_on list)", classifiedState)
+		logging.Debug("skipping notification", "state", classifiedState, "reason", "not in notify_on list")
 		return nil
 	}
 
@@ -128,7 +139,7 @@ func (r *Router) Process(ctx context.Context, input *hook.HookInput) error {
 
 	// Check for duplicate notifications
 	if r.deduplicator != nil && !r.deduplicator.ShouldSend(msg) {
-		log.Printf("router: suppressing duplicate notification for session %q", input.SessionID)
+		logging.Debug("suppressing duplicate", "session", input.SessionID)
 		return nil
 	}
 
@@ -153,11 +164,11 @@ func (r *Router) classifyState(ctx context.Context, input *hook.HookInput, t *tr
 			enabledProviders := r.config.GetEnabledProviders()
 			result, err := r.evaluator.Evaluate(ctx, userRequest, assistantResponse, enabledProviders...)
 			if err != nil {
-				log.Printf("router: evaluator failed, falling back to heuristics: %v", err)
+				logging.Warn("evaluator failed, using heuristics", "error", err)
 			} else if result != nil {
 				// Map evaluator state to internal state
 				evalState := r.mapEvaluatorState(result.State)
-				log.Printf("router: LLM classified state as %q (confidence: %.2f)", evalState, result.Confidence)
+				logging.Debug("LLM classification", "state", evalState, "confidence", result.Confidence)
 				return evalState, result.Summary
 			}
 		}
@@ -165,7 +176,7 @@ func (r *Router) classifyState(ctx context.Context, input *hook.HookInput, t *tr
 
 	// Fall back to heuristic classification
 	classifiedState := r.classifier.Classify(input, t)
-	log.Printf("router: heuristic classified state as %q", classifiedState)
+	logging.Debug("heuristic classification", "state", classifiedState)
 	return classifiedState, ""
 }
 
@@ -201,10 +212,10 @@ func (r *Router) buildMessageWithSummary(input *hook.HookInput, t *transcript.Tr
 		summary = r.generateSummary(t, s)
 	}
 
-	// Get the last user prompt as the request
+	// Get the last user prompt as the request (truncated for mobile)
 	request := ""
 	if t != nil {
-		request = t.LastUserPrompt()
+		request = truncateRequest(t.LastUserPrompt())
 	}
 
 	// Get cwd from input
@@ -239,13 +250,16 @@ func (r *Router) generateTitle(s state.State) string {
 }
 
 // generateSummary creates a summary from the transcript and state.
+// Maximum summary length is 280 chars - fits well on mobile while allowing complete thoughts.
+const maxSummaryLength = 280
+
 func (r *Router) generateSummary(t *transcript.Transcript, s state.State) string {
 	// First, try to get a meaningful summary from the last assistant response
 	if t != nil {
 		lastResponse := t.LastAssistantResponse()
 		if lastResponse != "" {
-			// Truncate if too long
-			summary := truncateSummary(lastResponse, r.config.Behavior.MaxMessageLength/2)
+			// Truncate to mobile-friendly length (max 150 chars)
+			summary := truncateSummary(lastResponse, maxSummaryLength)
 			return summary
 		}
 	}
@@ -278,6 +292,46 @@ func truncateSummary(s string, maxLen int) string {
 	return truncated + "..."
 }
 
+// truncateRequest extracts a concise request from the user prompt.
+// For very long prompts (like context summaries), it extracts just the first line.
+// Maximum length is 100 characters for mobile display.
+const maxRequestLength = 100
+
+func truncateRequest(s string) string {
+	if s == "" {
+		return ""
+	}
+
+	// Clean and get the first line
+	s = strings.TrimSpace(s)
+
+	// Find first newline
+	if idx := strings.Index(s, "\n"); idx > 0 {
+		s = s[:idx]
+	}
+
+	// Strip any leading "This session is being continued..." boilerplate
+	// These are context restoration messages, not actual requests
+	if strings.HasPrefix(s, "This session is being continued") {
+		// Try to find the actual request after "Request:" or similar marker
+		// If not found, just use a generic description
+		s = "[Continued session]"
+	}
+
+	// Final length truncation
+	s = strings.TrimSpace(s)
+	if len(s) > maxRequestLength {
+		// Try to break at word boundary
+		truncated := s[:maxRequestLength]
+		if lastSpace := strings.LastIndex(truncated, " "); lastSpace > maxRequestLength/2 {
+			truncated = truncated[:lastSpace]
+		}
+		return truncated + "..."
+	}
+
+	return s
+}
+
 // handleProviderErrors aggregates errors from multiple providers.
 // Individual provider failures are logged but don't stop other providers.
 func (r *Router) handleProviderErrors(errors map[string]error) error {
@@ -287,7 +341,7 @@ func (r *Router) handleProviderErrors(errors map[string]error) error {
 
 	// Log each error
 	for provider, err := range errors {
-		log.Printf("router: provider %q failed: %v", provider, err)
+		logging.Error("provider failed", "provider", provider, "error", err)
 	}
 
 	// If all providers failed, return an aggregated error

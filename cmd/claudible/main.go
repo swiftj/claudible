@@ -7,7 +7,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/swiftj/claudible/internal/config"
 	"github.com/swiftj/claudible/internal/hook"
+	"github.com/swiftj/claudible/internal/logging"
 	"github.com/swiftj/claudible/internal/router"
 	"github.com/swiftj/claudible/internal/setup"
 	"github.com/swiftj/claudible/internal/state"
@@ -23,7 +23,7 @@ import (
 
 const (
 	// Version is the current version of Claudible.
-	Version = "0.1.0"
+	Version = "0.5.0"
 
 	// DefaultTimeout is the default context timeout for processing.
 	DefaultTimeout = 30 * time.Second
@@ -59,8 +59,17 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Set up logger to write to stderr (stdout reserved for future use)
-	logger := log.New(os.Stderr, "claudible: ", log.LstdFlags)
+	// Initialize system logging
+	// Verbose mode: debug level; Normal mode: info level (errors always logged)
+	logLevel := logging.LevelInfo
+	if f.verbose {
+		logLevel = logging.LevelDebug
+	}
+	if err := logging.Init(logLevel); err != nil {
+		// Fallback to stderr if system logging fails
+		fmt.Fprintf(os.Stderr, "warning: failed to initialize system logging: %v\n", err)
+	}
+	defer func() { _ = logging.Close() }()
 
 	// Set up signal handling for graceful shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
@@ -71,14 +80,12 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		sig := <-sigChan
-		if f.verbose {
-			logger.Printf("received signal: %v, shutting down", sig)
-		}
+		logging.Debug("received signal, shutting down", "signal", sig)
 		cancel()
 	}()
 
 	// Run the main logic
-	exitCode := run(ctx, f, logger)
+	exitCode := run(ctx, f)
 	os.Exit(exitCode)
 }
 
@@ -97,42 +104,38 @@ func parseFlags() flags {
 }
 
 // run contains the main application logic and returns an exit code.
-func run(ctx context.Context, f flags, logger *log.Logger) int {
+func run(ctx context.Context, f flags) int {
 	// Load configuration
 	cfg, err := loadConfig(f.configPath)
 	if err != nil {
-		logger.Printf("error loading config: %v", err)
+		logging.Error("failed to load config", "error", err)
 		return 1
 	}
 
-	if f.verbose {
-		logger.Printf("loaded configuration from: %s", configSource(f.configPath))
-	}
+	logging.Debug("loaded configuration", "source", configSource(f.configPath))
 
 	// Parse hook input from stdin
 	input, err := hook.ParseHookInputFromStdin()
 	if err != nil {
-		logger.Printf("error parsing hook input: %v", err)
+		logging.Error("failed to parse hook input", "error", err)
 		return 1
 	}
 
 	// Validate hook input
 	if err := input.Validate(); err != nil {
-		logger.Printf("invalid hook input: %v", err)
+		logging.Error("invalid hook input", "error", err)
 		return 1
 	}
 
-	if f.verbose {
-		logger.Printf("received hook: session=%s, type=%s, cwd=%s",
-			input.SessionID, input.NotificationType, input.Cwd)
-	}
+	logging.Debug("received hook",
+		"session", input.SessionID,
+		"type", input.NotificationType,
+		"cwd", input.Cwd)
 
 	// Parse transcript for dry-run classification
 	t, err := transcript.Parse(input.TranscriptPath)
 	if err != nil {
-		if f.verbose {
-			logger.Printf("warning: failed to parse transcript: %v", err)
-		}
+		logging.Warn("failed to parse transcript", "error", err, "path", input.TranscriptPath)
 		// Continue with nil transcript - classifier handles this
 		t = nil
 	}
@@ -141,21 +144,19 @@ func run(ctx context.Context, f flags, logger *log.Logger) int {
 	classifier := state.NewClassifier()
 	agentState := classifier.Classify(input, t)
 
-	if f.verbose {
-		logger.Printf("classified state: %s (%s)", agentState, agentState.Description())
-	}
+	logging.Debug("classified state",
+		"state", agentState.String(),
+		"description", agentState.Description())
 
 	// Check if we should notify for this state
 	if !cfg.ShouldNotifyOn(agentState.String()) {
-		if f.verbose {
-			logger.Printf("notifications disabled for state: %s", agentState)
-		}
+		logging.Debug("notifications disabled for state", "state", agentState)
 		return 0
 	}
 
 	// Dry run mode - stop before sending notifications
 	if f.dryRun {
-		logger.Printf("dry-run: would send notification for state=%s", agentState)
+		logging.Info("dry-run mode", "state", agentState)
 		return 0
 	}
 
@@ -163,21 +164,21 @@ func run(ctx context.Context, f flags, logger *log.Logger) int {
 	r := router.NewRouter(cfg)
 
 	if r.Registry().EnabledCount() == 0 {
-		if f.verbose {
-			logger.Printf("no notification providers enabled")
-		}
+		logging.Debug("no notification providers enabled")
 		return 0
 	}
 
-	if f.verbose {
-		logger.Printf("sending notification to %d provider(s)", r.Registry().EnabledCount())
-	}
+	logging.Debug("sending notification", "providers", r.Registry().EnabledCount())
 
 	// Process the notification through the router
 	err = r.Process(ctx, input)
 	if err != nil {
 		// Log errors but exit 0 - notifications are best-effort
-		logger.Printf("notification error: %v", err)
+		logging.Error("notification failed", "error", err)
+	} else {
+		logging.Info("notification sent",
+			"session", input.SessionID,
+			"state", agentState.String())
 	}
 
 	return 0
