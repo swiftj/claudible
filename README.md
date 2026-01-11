@@ -2,9 +2,18 @@
 
 **Async notifications for Claude Code** — Get notified when Claude finishes work, needs input, or stops.
 
-[![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://go.dev/)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
+<p align="center">
+  <img src="https://img.shields.io/badge/version-0.5.5-blue?style=for-the-badge" alt="Version">
+  <img src="https://img.shields.io/badge/Go-1.21+-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go Version">
+  <img src="https://img.shields.io/badge/macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="macOS">
+  <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License">
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/AI-Multi--Provider-F472B6?style=for-the-badge" alt="AI Multi-Provider">
+  <img src="https://img.shields.io/badge/Claude_Code-Compatible-cc785c?style=for-the-badge&logo=anthropic&logoColor=white" alt="Claude Code Compatible">
+  <img src="https://img.shields.io/badge/Tests-Passing-brightgreen?style=for-the-badge" alt="Tests">
+</p>
 
 ---
 
