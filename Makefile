@@ -1,7 +1,7 @@
 # Claudible Makefile
 # Build and development commands for the Claude Code notification system
 
-.PHONY: all build test lint fmt clean install help
+.PHONY: all build test lint fmt clean install setup-hooks help
 
 # Build variables
 BINARY_NAME := claudible
@@ -84,6 +84,13 @@ config-dir:
 version:
 	@echo "$(BINARY_NAME) version $(VERSION)"
 
+# Setup git hooks (auto-bump version on commit)
+setup-hooks:
+	@echo "Installing git hooks..."
+	@cp scripts/pre-commit .git/hooks/pre-commit
+	@chmod +x .git/hooks/pre-commit
+	@echo "Git hooks installed. Version will auto-bump on commit."
+
 # Help
 help:
 	@echo "Claudible - Claude Code Notification System"
@@ -103,5 +110,6 @@ help:
 	@echo "  install        Install to GOPATH/bin"
 	@echo "  install-system Install to /usr/local/bin"
 	@echo "  config-dir     Create config directory"
+	@echo "  setup-hooks    Install git hooks (auto-bump version)"
 	@echo "  version        Show version"
 	@echo "  help           Show this help"
