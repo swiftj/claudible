@@ -34,3 +34,4 @@ Claudible is a notification system for Claude Code hooks, written in Go. It acts
 - Follow existing Go idioms and project structure.
 - Run `make test` and `make lint` before finishing tasks.
 - Ensure cross-platform compatibility where possible (check build tags for OS-specific providers like iMessage).
+- Single static binary, no CGO

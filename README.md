@@ -64,7 +64,7 @@ The fastest way to get started on macOS:
 
 ```bash
 # 1. Install claudible globally
-go install github.com/johnswift/claudible/cmd/claudible@latest
+go install github.com/swiftj/claudible/cmd/claudible@latest
 
 # 2. Run the setup wizard
 claudible setup
@@ -125,7 +125,7 @@ echo '{"session_id":"test","cwd":"/tmp","transcript_path":"","notification_type"
 
 ```bash
 # Clone the repository
-git clone https://github.com/johnswift/claudible.git
+git clone https://github.com/swiftj/claudible.git
 cd claudible
 
 # Build and install
@@ -720,7 +720,7 @@ Contributions are welcome! Please read our contributing guidelines before submit
 
 ```bash
 # Clone
-git clone https://github.com/johnswift/claudible.git
+git clone https://github.com/swiftj/claudible.git
 cd claudible
 
 # Install dependencies

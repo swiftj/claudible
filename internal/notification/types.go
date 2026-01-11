@@ -5,7 +5,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/johnswift/claudible/internal/state"
+	"github.com/swiftj/claudible/internal/state"
 )
 
 // NotificationMessage is the unified message format for all providers.

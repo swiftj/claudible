@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/johnswift/claudible/internal/config"
-	"github.com/johnswift/claudible/internal/hook"
-	"github.com/johnswift/claudible/internal/notification"
-	"github.com/johnswift/claudible/internal/state"
-	"github.com/johnswift/claudible/internal/transcript"
+	"github.com/swiftj/claudible/internal/config"
+	"github.com/swiftj/claudible/internal/hook"
+	"github.com/swiftj/claudible/internal/notification"
+	"github.com/swiftj/claudible/internal/state"
+	"github.com/swiftj/claudible/internal/transcript"
 )
 
 // mockProvider is a test double for notification.Provider.
@@ -117,9 +117,9 @@ func TestRouter_Process(t *testing.T) {
 		r := NewRouter(cfg)
 
 		input := &hook.HookInput{
-			SessionID:        "test-session",
-			TranscriptPath:   "/nonexistent/path/transcript.jsonl",
-			NotificationType: "stop",
+			SessionID:      "test-session",
+			TranscriptPath: "/nonexistent/path/transcript.jsonl",
+			HookEventName:  "Stop",
 		}
 
 		err := r.Process(context.Background(), input)
@@ -147,6 +147,7 @@ func TestRouter_Process(t *testing.T) {
 		input := &hook.HookInput{
 			SessionID:        "test-session",
 			TranscriptPath:   transcriptPath,
+			HookEventName:    "Notification",
 			NotificationType: "idle_prompt", // This produces "waiting" state
 		}
 
@@ -180,10 +181,10 @@ func TestRouter_Process(t *testing.T) {
 		transcriptPath := createTempTranscript(t, transcriptContent)
 
 		input := &hook.HookInput{
-			SessionID:        "test-session",
-			Cwd:              "/test/project",
-			TranscriptPath:   transcriptPath,
-			NotificationType: "stop",
+			SessionID:      "test-session",
+			Cwd:            "/test/project",
+			TranscriptPath: transcriptPath,
+			HookEventName:  "Stop",
 		}
 
 		err := r.Process(context.Background(), input)
@@ -239,7 +240,7 @@ func TestRouter_Process(t *testing.T) {
 		input := &hook.HookInput{
 			SessionID:        "test-session",
 			TranscriptPath:   transcriptPath,
-			NotificationType: "stop",
+			HookEventName: "Stop",
 		}
 
 		// Should not return error since at least one provider succeeded
@@ -277,7 +278,7 @@ func TestRouter_Process(t *testing.T) {
 		input := &hook.HookInput{
 			SessionID:        "test-session",
 			TranscriptPath:   transcriptPath,
-			NotificationType: "stop",
+			HookEventName: "Stop",
 		}
 
 		err := r.Process(context.Background(), input)
@@ -296,7 +297,7 @@ func TestRouter_Process(t *testing.T) {
 		input := &hook.HookInput{
 			SessionID:        "test-session",
 			TranscriptPath:   "/some/path",
-			NotificationType: "stop",
+			HookEventName: "Stop",
 		}
 
 		err := r.Process(ctx, input)
@@ -324,7 +325,7 @@ func TestRouter_buildMessage(t *testing.T) {
 			SessionID:        "session-123",
 			Cwd:              "/home/user/project",
 			TranscriptPath:   transcriptPath,
-			NotificationType: "stop",
+			HookEventName: "Stop",
 		}
 
 		msg := r.buildMessage(input, trans, state.StateComplete)
@@ -524,7 +525,7 @@ func TestRouter_Integration(t *testing.T) {
 			SessionID:        "integration-test",
 			Cwd:              "/test/auth-project",
 			TranscriptPath:   transcriptPath,
-			NotificationType: "stop",
+			HookEventName: "Stop",
 		}
 
 		err := r.Process(context.Background(), input)
@@ -574,7 +575,7 @@ func BenchmarkRouter_Process(b *testing.B) {
 		SessionID:        "bench-session",
 		Cwd:              "/bench",
 		TranscriptPath:   transcriptPath,
-		NotificationType: "stop",
+		HookEventName: "Stop",
 	}
 
 	ctx := context.Background()
@@ -608,7 +609,7 @@ func TestRouter_Timeout(t *testing.T) {
 	input := &hook.HookInput{
 		SessionID:        "timeout-test",
 		TranscriptPath:   transcriptPath,
-		NotificationType: "stop",
+		HookEventName: "Stop",
 	}
 
 	// Use a very short timeout
@@ -658,7 +659,7 @@ func TestRouter_classifyState(t *testing.T) {
 		trans, _ := transcript.Parse(transcriptPath)
 
 		input := &hook.HookInput{
-			NotificationType: "stop",
+			HookEventName: "Stop",
 		}
 
 		classifiedState, summary := r.classifyState(context.Background(), input, trans)
@@ -686,6 +687,7 @@ func TestRouter_classifyState(t *testing.T) {
 		trans, _ := transcript.Parse(transcriptPath)
 
 		input := &hook.HookInput{
+			HookEventName:    "Notification",
 			NotificationType: "idle_prompt",
 		}
 
@@ -708,7 +710,7 @@ func TestRouter_classifyState(t *testing.T) {
 		r := NewRouter(cfg)
 
 		input := &hook.HookInput{
-			NotificationType: "stop",
+			HookEventName: "Stop",
 		}
 
 		classifiedState, summary := r.classifyState(context.Background(), input, nil)

@@ -324,7 +324,11 @@ type Hook struct {
 	Command string `json:"command"`
 }
 
-// addClaudeCodeHook adds the SessionEnd hook to Claude Code settings.
+// addClaudeCodeHook adds Notification and Stop hooks to Claude Code settings.
+// This configures claudible to receive notifications when:
+// - Claude is idle waiting for user input (idle_prompt)
+// - Claude is blocked waiting for permission (permission_prompt)
+// - Claude stops for any reason (completion, interruption, error)
 func (w *Wizard) addClaudeCodeHook(binaryPath string) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -361,37 +365,31 @@ func (w *Wizard) addClaudeCodeHook(binaryPath string) error {
 		hooks = make(map[string][]HookMatcher)
 	}
 
-	// Create the claudible hook
+	// Create the claudible hook command
 	claudibleHook := Hook{
 		Type:    "command",
 		Command: binaryPath,
 	}
 
-	// Check if SessionEnd hooks exist
-	sessionEndHooks := hooks["SessionEnd"]
-	hookExists := false
-	for i, matcher := range sessionEndHooks {
-		// Check if this is already our hook (any matcher with claudible command)
-		for j, hook := range matcher.Hooks {
-			if strings.Contains(hook.Command, "claudible") {
-				// Update existing hook
-				sessionEndHooks[i].Hooks[j] = claudibleHook
-				hookExists = true
-				break
-			}
-		}
-	}
-
-	if !hookExists {
-		// Add new hook matcher for all events
-		newMatcher := HookMatcher{
-			Matcher: "",
+	// Configure Notification hooks (idle_prompt and permission_prompt)
+	hooks["Notification"] = w.updateOrAddHooks(hooks["Notification"], []HookMatcher{
+		{
+			Matcher: "idle_prompt",
 			Hooks:   []Hook{claudibleHook},
-		}
-		sessionEndHooks = append(sessionEndHooks, newMatcher)
-	}
+		},
+		{
+			Matcher: "permission_prompt",
+			Hooks:   []Hook{claudibleHook},
+		},
+	}, binaryPath)
 
-	hooks["SessionEnd"] = sessionEndHooks
+	// Configure Stop hooks (fires on completion, interruption, or error)
+	hooks["Stop"] = w.updateOrAddHooks(hooks["Stop"], []HookMatcher{
+		{
+			Matcher: "", // Empty matcher catches all stop events
+			Hooks:   []Hook{claudibleHook},
+		},
+	}, binaryPath)
 
 	// Marshal hooks back
 	hooksData, err := json.Marshal(hooks)
@@ -411,10 +409,74 @@ func (w *Wizard) addClaudeCodeHook(binaryPath string) error {
 	}
 
 	if w.verbose {
-		fmt.Printf("✅ Added hook to %s\n", settingsPath)
+		fmt.Printf("✅ Added hooks to %s\n", settingsPath)
 	}
 
 	return nil
+}
+
+// updateOrAddHooks updates existing claudible hooks or adds new ones.
+// It preserves non-claudible hooks and updates/adds claudible hooks by matcher.
+func (w *Wizard) updateOrAddHooks(existing []HookMatcher, desired []HookMatcher, _ string) []HookMatcher {
+	// Build a map of desired matchers for quick lookup
+	desiredByMatcher := make(map[string]HookMatcher)
+	for _, d := range desired {
+		desiredByMatcher[d.Matcher] = d
+	}
+
+	// Track which desired matchers we've handled
+	handled := make(map[string]bool)
+
+	// Update existing hooks
+	result := make([]HookMatcher, 0, len(existing)+len(desired))
+	for _, matcher := range existing {
+		// Check if this matcher has a claudible hook
+		hasClaudible := false
+		for _, hook := range matcher.Hooks {
+			if strings.Contains(hook.Command, "claudible") {
+				hasClaudible = true
+				break
+			}
+		}
+
+		if hasClaudible {
+			// If we have a desired hook for this matcher, replace the claudible hook
+			if desiredHook, ok := desiredByMatcher[matcher.Matcher]; ok {
+				// Update claudible hooks, preserve others
+				newHooks := make([]Hook, 0, len(matcher.Hooks))
+				for _, hook := range matcher.Hooks {
+					if !strings.Contains(hook.Command, "claudible") {
+						newHooks = append(newHooks, hook)
+					}
+				}
+				newHooks = append(newHooks, desiredHook.Hooks...)
+				matcher.Hooks = newHooks
+				handled[matcher.Matcher] = true
+			}
+		}
+		result = append(result, matcher)
+	}
+
+	// Add any desired hooks that weren't already present
+	for _, d := range desired {
+		if !handled[d.Matcher] {
+			// Check if there's an existing matcher without claudible
+			found := false
+			for i, matcher := range result {
+				if matcher.Matcher == d.Matcher {
+					// Add claudible hook to existing matcher
+					result[i].Hooks = append(result[i].Hooks, d.Hooks...)
+					found = true
+					break
+				}
+			}
+			if !found {
+				result = append(result, d)
+			}
+		}
+	}
+
+	return result
 }
 
 // printSuccess prints the success message with next steps.
@@ -425,10 +487,16 @@ func (w *Wizard) printSuccess(configPath, binaryPath string) {
 	fmt.Println("📋 What was configured:")
 	fmt.Printf("   • Config file: %s\n", configPath)
 	fmt.Printf("   • Binary path: %s\n", binaryPath)
-	fmt.Println("   • Claude Code hook: SessionEnd → claudible")
+	fmt.Println("   • Claude Code hooks:")
+	fmt.Println("     - Notification (idle_prompt) → claudible")
+	fmt.Println("     - Notification (permission_prompt) → claudible")
+	fmt.Println("     - Stop → claudible")
 	fmt.Println()
 	fmt.Println("🎉 You're all set! Claude Code will now send you iMessage")
-	fmt.Println("   notifications when tasks complete or need your input.")
+	fmt.Println("   notifications when:")
+	fmt.Println("   • Claude finishes and is waiting for your input")
+	fmt.Println("   • Claude needs permission to proceed")
+	fmt.Println("   • Claude stops for any reason (completion/error)")
 	fmt.Println()
 	fmt.Println("💡 Tips:")
 	fmt.Println("   • Edit the config to customize notification behavior")

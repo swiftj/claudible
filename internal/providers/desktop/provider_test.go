@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/johnswift/claudible/internal/config"
-	"github.com/johnswift/claudible/internal/notification"
-	"github.com/johnswift/claudible/internal/state"
+	"github.com/swiftj/claudible/internal/config"
+	"github.com/swiftj/claudible/internal/notification"
+	"github.com/swiftj/claudible/internal/state"
 )
 
 // MockExecutor is a mock implementation of CommandExecutor for testing.

@@ -13,12 +13,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/johnswift/claudible/internal/config"
-	"github.com/johnswift/claudible/internal/hook"
-	"github.com/johnswift/claudible/internal/router"
-	"github.com/johnswift/claudible/internal/setup"
-	"github.com/johnswift/claudible/internal/state"
-	"github.com/johnswift/claudible/internal/transcript"
+	"github.com/swiftj/claudible/internal/config"
+	"github.com/swiftj/claudible/internal/hook"
+	"github.com/swiftj/claudible/internal/router"
+	"github.com/swiftj/claudible/internal/setup"
+	"github.com/swiftj/claudible/internal/state"
+	"github.com/swiftj/claudible/internal/transcript"
 )
 
 const (
@@ -261,6 +261,6 @@ Examples:
   # Test hook processing without sending notifications
   echo '{"session_id":"test"}' | claudible --dry-run --verbose
 
-For more information, visit: https://github.com/johnswift/claudible
+For more information, visit: https://github.com/swiftj/claudible
 `, Version)
 }

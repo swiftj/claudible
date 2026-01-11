@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johnswift/claudible/internal/config"
-	"github.com/johnswift/claudible/internal/notification"
+	"github.com/swiftj/claudible/internal/config"
+	"github.com/swiftj/claudible/internal/notification"
 )
 
 const (

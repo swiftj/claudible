@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/johnswift/claudible/internal/hook"
-	"github.com/johnswift/claudible/internal/transcript"
+	"github.com/swiftj/claudible/internal/hook"
+	"github.com/swiftj/claudible/internal/transcript"
 )
 
 // Helper to create a transcript from entries.
@@ -14,11 +14,20 @@ func makeTranscript(entries ...transcript.Entry) *transcript.Transcript {
 }
 
 // Helper to create a hook input.
+// For "stop" notification type, creates a Stop hook event.
+// For other types (idle_prompt, permission_prompt), creates a Notification hook event.
 func makeHookInput(notificationType string) *hook.HookInput {
+	hookEventName := "Notification"
+	if notificationType == "stop" {
+		hookEventName = "Stop"
+		// Stop hooks don't have notification_type in the actual JSON from Claude Code
+		notificationType = ""
+	}
 	return &hook.HookInput{
 		SessionID:        "test-session",
 		Cwd:              "/tmp",
 		TranscriptPath:   "/tmp/transcript.jsonl",
+		HookEventName:    hookEventName,
 		NotificationType: notificationType,
 	}
 }

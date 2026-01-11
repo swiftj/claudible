@@ -4,8 +4,8 @@ package state
 import (
 	"strings"
 
-	"github.com/johnswift/claudible/internal/hook"
-	"github.com/johnswift/claudible/internal/transcript"
+	"github.com/swiftj/claudible/internal/hook"
+	"github.com/swiftj/claudible/internal/transcript"
 )
 
 // Default error patterns that indicate a stopped/failed state.

@@ -1,4 +1,4 @@
-module github.com/johnswift/claudible
+module github.com/swiftj/claudible
 
 go 1.25.5
 

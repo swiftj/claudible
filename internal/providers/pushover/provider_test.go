@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/johnswift/claudible/internal/config"
-	"github.com/johnswift/claudible/internal/notification"
-	"github.com/johnswift/claudible/internal/state"
+	"github.com/swiftj/claudible/internal/config"
+	"github.com/swiftj/claudible/internal/notification"
+	"github.com/swiftj/claudible/internal/state"
 )
 
 func TestNew(t *testing.T) {

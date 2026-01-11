@@ -147,19 +147,49 @@ func TestAddClaudeCodeHook(t *testing.T) {
 		t.Fatalf("failed to parse hooks: %v", err)
 	}
 
-	// Verify SessionEnd hook exists
-	sessionEndHooks, ok := hooks["SessionEnd"]
+	// Verify Notification hooks exist
+	notificationHooks, ok := hooks["Notification"]
 	if !ok {
-		t.Fatal("SessionEnd hook not found")
+		t.Fatal("Notification hook not found")
 	}
 
-	if len(sessionEndHooks) == 0 {
-		t.Fatal("SessionEnd has no hook matchers")
+	// Verify we have both idle_prompt and permission_prompt matchers
+	matchers := make(map[string]bool)
+	for _, matcher := range notificationHooks {
+		matchers[matcher.Matcher] = true
+		// Verify each has claudible command
+		found := false
+		for _, hook := range matcher.Hooks {
+			if hook.Command == binaryPath {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Notification matcher %q missing claudible command", matcher.Matcher)
+		}
 	}
 
-	// Verify hook command
+	if !matchers["idle_prompt"] {
+		t.Error("Notification hook missing idle_prompt matcher")
+	}
+	if !matchers["permission_prompt"] {
+		t.Error("Notification hook missing permission_prompt matcher")
+	}
+
+	// Verify Stop hook exists
+	stopHooks, ok := hooks["Stop"]
+	if !ok {
+		t.Fatal("Stop hook not found")
+	}
+
+	if len(stopHooks) == 0 {
+		t.Fatal("Stop has no hook matchers")
+	}
+
+	// Verify Stop hook has claudible command
 	found := false
-	for _, matcher := range sessionEndHooks {
+	for _, matcher := range stopHooks {
 		for _, hook := range matcher.Hooks {
 			if hook.Command == binaryPath {
 				found = true
@@ -168,7 +198,7 @@ func TestAddClaudeCodeHook(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("hook command %q not found in SessionEnd hooks", binaryPath)
+		t.Errorf("hook command %q not found in Stop hooks", binaryPath)
 	}
 }
 
@@ -230,9 +260,23 @@ func TestAddClaudeCodeHook_ExistingSettings(t *testing.T) {
 		t.Error("permissions field was removed from settings")
 	}
 
-	// Verify hooks added
-	if _, ok := settings["hooks"]; !ok {
-		t.Error("hooks field not added to settings")
+	// Verify hooks added with correct structure
+	hooksRaw, ok := settings["hooks"]
+	if !ok {
+		t.Fatal("hooks field not added to settings")
+	}
+
+	var hooks map[string][]HookMatcher
+	if err := json.Unmarshal(hooksRaw, &hooks); err != nil {
+		t.Fatalf("failed to parse hooks: %v", err)
+	}
+
+	// Verify both Notification and Stop hooks exist
+	if _, ok := hooks["Notification"]; !ok {
+		t.Error("Notification hooks not added")
+	}
+	if _, ok := hooks["Stop"]; !ok {
+		t.Error("Stop hooks not added")
 	}
 }
 
