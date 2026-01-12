@@ -492,6 +492,8 @@ func smartTruncate(s string, maxLen int) string {
 
 // stripEmphasis removes Markdown emphasis markers (like ** or _) while keeping the text.
 // For example: "**bold**" -> "bold", "_italic_" -> "italic"
+// Importantly, this respects word boundaries - underscores in the middle of words like
+// "MCP_Cortex.md" are NOT treated as emphasis markers.
 func stripEmphasis(s, marker string) string {
 	for {
 		start := strings.Index(s, marker)
@@ -500,14 +502,85 @@ func stripEmphasis(s, marker string) string {
 		}
 		end := strings.Index(s[start+len(marker):], marker)
 		if end == -1 {
-			// Unmatched marker, just remove it
-			s = s[:start] + s[start+len(marker):]
-			continue
+			// Unmatched marker - just leave it alone
+			break
 		}
-		// Found matching pair - remove both markers, keep content
+		// Found matching pair - check if they form valid emphasis boundaries
 		end = start + len(marker) + end
+		if !isValidOpeningMarker(s, start, len(marker)) || !isValidClosingMarker(s, end, len(marker)) {
+			// Not valid emphasis markers (in middle of word), skip
+			// Search for next occurrence after this one
+			remaining := s[start+len(marker):]
+			nextStart := strings.Index(remaining, marker)
+			if nextStart == -1 {
+				break
+			}
+			// Continue searching from after the current marker
+			prefix := s[:start+len(marker)]
+			suffix := stripEmphasis(remaining, marker)
+			return prefix + suffix
+		}
+		// Valid emphasis - remove both markers, keep content
 		content := s[start+len(marker) : end]
 		s = s[:start] + content + s[end+len(marker):]
 	}
 	return s
+}
+
+// isValidOpeningMarker checks if a marker at position pos can be a valid opening emphasis marker.
+// An opening marker must be:
+// - At start of string OR preceded by whitespace/punctuation (not alphanumeric)
+// - Followed by non-whitespace (the content to emphasize)
+func isValidOpeningMarker(s string, pos int, markerLen int) bool {
+	// Check character before the marker (must not be alphanumeric)
+	if pos > 0 {
+		before := s[pos-1]
+		if isAlphanumeric(before) {
+			return false
+		}
+	}
+
+	// Check character after the marker (must exist and not be whitespace)
+	afterPos := pos + markerLen
+	if afterPos >= len(s) {
+		return false // Nothing after marker
+	}
+	return !isWhitespace(s[afterPos])
+}
+
+// isValidClosingMarker checks if a marker at position pos can be a valid closing emphasis marker.
+// A closing marker must be:
+// - Preceded by non-whitespace (the content to emphasize)
+// - At end of string OR followed by whitespace/punctuation (not alphanumeric)
+func isValidClosingMarker(s string, pos int, markerLen int) bool {
+	// Check character before the marker (must not be whitespace)
+	if pos > 0 {
+		before := s[pos-1]
+		if isWhitespace(before) {
+			return false
+		}
+	} else {
+		return false // Nothing before marker
+	}
+
+	// Check character after the marker (must not be alphanumeric)
+	afterPos := pos + markerLen
+	if afterPos < len(s) {
+		after := s[afterPos]
+		if isAlphanumeric(after) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// isAlphanumeric returns true if the byte is a letter or digit.
+func isAlphanumeric(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+}
+
+// isWhitespace returns true if the byte is a whitespace character.
+func isWhitespace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
 }

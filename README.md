@@ -3,7 +3,7 @@
 **Async notifications for Claude Code** — Get notified when Claude finishes work, needs input, or stops.
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.5.5-blue?style=for-the-badge" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.5.6-blue?style=for-the-badge" alt="Version">
   <img src="https://img.shields.io/badge/Go-1.21+-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go Version">
   <img src="https://img.shields.io/badge/macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="macOS">
   <img src="https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Linux">

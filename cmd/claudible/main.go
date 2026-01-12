@@ -23,7 +23,7 @@ import (
 
 const (
 	// Version is the current version of Claudible.
-	Version = "0.5.5"
+	Version = "0.5.6"
 
 	// DefaultTimeout is the default context timeout for processing.
 	DefaultTimeout = 30 * time.Second

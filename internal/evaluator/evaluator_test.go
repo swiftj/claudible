@@ -804,3 +804,199 @@ func (t *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req.URL.Host = strings.TrimPrefix(t.url, "http://")
 	return t.delegate.RoundTrip(req)
 }
+
+// TestSanitizeSummary tests the SanitizeSummary function.
+func TestSanitizeSummary(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "plain text unchanged",
+			input: "This is plain text",
+			want:  "This is plain text",
+		},
+		{
+			name:  "bold markdown stripped",
+			input: "This is **bold** text",
+			want:  "This is bold text",
+		},
+		{
+			name:  "italic with asterisk stripped",
+			input: "This is *italic* text",
+			want:  "This is italic text",
+		},
+		{
+			name:  "italic with underscore stripped",
+			input: "This is _italic_ text",
+			want:  "This is italic text",
+		},
+		{
+			name:  "bold italic stripped",
+			input: "This is ***bold italic*** text",
+			want:  "This is bold italic text",
+		},
+		{
+			name:  "underscore in filename preserved",
+			input: "Created MCP_Cortex.md file",
+			want:  "Created MCP_Cortex.md file",
+		},
+		{
+			name:  "multiple underscores in filename preserved",
+			input: "Created MCP_Cortex_Config.md file",
+			want:  "Created MCP_Cortex_Config.md file",
+		},
+		{
+			name:  "underscore in path preserved",
+			input: "File at ~/.claude/MCP_Cortex.md",
+			want:  "File at ~/.claude/MCP_Cortex.md",
+		},
+		{
+			name:  "snake_case variable preserved",
+			input: "Updated user_name variable",
+			want:  "Updated user_name variable",
+		},
+		{
+			name:  "mixed emphasis and underscores - ambiguous case preserved",
+			input: "Created _MCP_Cortex.md_ as a new file",
+			want:  "Created _MCP_Cortex.md_ as a new file", // Ambiguous - inner _ breaks emphasis detection
+		},
+		{
+			name:  "emphasis at word boundary only",
+			input: "The _important_ file is config_file.yaml",
+			want:  "The important file is config_file.yaml",
+		},
+		{
+			name:  "code blocks removed",
+			input: "Run `npm install` command",
+			want:  "Run npm install command",
+		},
+		{
+			name:  "headers removed",
+			input: "## Summary of changes",
+			want:  "Summary of changes",
+		},
+		{
+			name:  "bullet points removed",
+			input: "- First item\n- Second item",
+			want:  "First item Second item",
+		},
+		{
+			name:  "newlines converted to spaces",
+			input: "Line one\nLine two",
+			want:  "Line one Line two",
+		},
+		{
+			name:  "multiple spaces collapsed",
+			input: "Too   many    spaces",
+			want:  "Too many spaces",
+		},
+		{
+			name:  "real world example with filename",
+			input: "The MCP_Cortex.md file has been created successfully. Here's a summary of what was delivered: Created: ~/.claude/MCP_Cortex.md The file follows the same structure as MCP_Synapse.md",
+			want:  "The MCP_Cortex.md file has been created successfully. Here's a summary of what was delivered: Created: ~/.claude/MCP_Cortex.md The file follows the same structure as MCP_Synapse.md",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SanitizeSummary(tt.input)
+			if got != tt.want {
+				t.Errorf("SanitizeSummary(%q)\n  got:  %q\n  want: %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestStripEmphasis tests the stripEmphasis helper function.
+func TestStripEmphasis(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		marker string
+		want   string
+	}{
+		{
+			name:   "basic underscore emphasis",
+			input:  "_italic_",
+			marker: "_",
+			want:   "italic",
+		},
+		{
+			name:   "underscore in middle of word not stripped",
+			input:  "snake_case",
+			marker: "_",
+			want:   "snake_case",
+		},
+		{
+			name:   "underscore in filename not stripped",
+			input:  "MCP_Cortex.md",
+			marker: "_",
+			want:   "MCP_Cortex.md",
+		},
+		{
+			name:   "multiple underscores in filename not stripped",
+			input:  "MCP_Cortex_Config.md",
+			marker: "_",
+			want:   "MCP_Cortex_Config.md",
+		},
+		{
+			name:   "emphasis with underscore filename inside - ambiguous preserved",
+			input:  "_MCP_Cortex.md_",
+			marker: "_",
+			want:   "_MCP_Cortex.md_", // Ambiguous - inner _ breaks emphasis detection
+		},
+		{
+			name:   "double asterisk bold",
+			input:  "**bold**",
+			marker: "**",
+			want:   "bold",
+		},
+		{
+			name:   "asterisk emphasis",
+			input:  "*italic*",
+			marker: "*",
+			want:   "italic",
+		},
+		{
+			name:   "no markers present",
+			input:  "no markers here",
+			marker: "_",
+			want:   "no markers here",
+		},
+		{
+			name:   "emphasis at start of string",
+			input:  "_start_ of text",
+			marker: "_",
+			want:   "start of text",
+		},
+		{
+			name:   "emphasis at end of string",
+			input:  "end of _text_",
+			marker: "_",
+			want:   "end of text",
+		},
+		{
+			name:   "multiple separate emphases",
+			input:  "_one_ and _two_",
+			marker: "_",
+			want:   "one and two",
+		},
+		{
+			name:   "underscore between numbers preserved",
+			input:  "value_123_456",
+			marker: "_",
+			want:   "value_123_456",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stripEmphasis(tt.input, tt.marker)
+			if got != tt.want {
+				t.Errorf("stripEmphasis(%q, %q)\n  got:  %q\n  want: %q", tt.input, tt.marker, got, tt.want)
+			}
+		})
+	}
+}
